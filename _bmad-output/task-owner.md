@@ -1,4 +1,22 @@
-# Linux Docker sharing trial preparation
+# VPN trial continuation
+
+- Owner: OpenCode — VPN trial continuation session, 2026-10-19.
+- Branch: `docs/vpn-trial-continuation`.
+- Worktree: `/tmp/opencode/termux-vm-vpn-trial-continuation`.
+- Base: freshly fetched `origin/main` at `8bd49ab74adcfcfb0917f20dab78ee8059b2aba5` (merged LD01 baseline and VPN readiness handoff).
+- Task: continue the VPN trial handoff and coordinate retained LD01 reuse; the user subsequently redirected execution to a separate controlled VPN on the supplied GCP VM.
+- Coordination: user selected **Owner cleared scoped reuse** in this session, relaying the prior Linux Docker trial owner's acknowledgement for exclusive continuation reuse of `tvm-share-ld01-*` and `/tmp/opencode/linux-docker-sharing-ld01.r9oRt6uM`, with no overlapping runtime or artifact edits. This is scoped reuse, not ownership transfer. The prior worktree was clean when inspected and remains the historical handoff; continuation edits belong in this worktree.
+- Retained resources: reuse the frozen image, A/B containers, respective home volumes, separate networks and scratch project listed in [execution-results.md](linux-docker-trial/execution-results.md). Preserve labels `task=linux-docker-sharing-trial`, `trial=ld01`, `owner=opencode-linux-trial-preparation`. No resources have been recreated, relabeled or mutated in this continuation. Reconcile exact retained IDs, image, mounts and capabilities with private baseline evidence before any later runtime change; their current state has not been rechecked in this session.
+- Original evaluation boundary: `tvm-eval-dhlrhsji-*` and original staging remain under the original evaluation owner. Earlier scoped staged-material read/private-adaptation/read-only-mount clearance remains as recorded below; it does not authorize modifying original staging/resources.
+- Historical company-session authorization: user approved immediate start, then confirmed no other session used the certificate and allowed up to three hours. Recorded at `2026-10-19T16:19:16Z`, with a hard stop at `2026-10-19T19:19:16Z` UTC including disconnect/cleanup. The later instruction not to use the company VPN supersedes this connection authorization.
+- Current scope: do not use the company VPN, certificate or staged profile. The user supplied GCP VM `free-vm`, accessible with `gcloud compute ssh free-vm --tunnel-through-iap`, for a separate VPN that issues a client configuration and provides access to internal test services. GCP access/networking and the controlled server/client/service/DNS/heartbeat design have not been inspected or implemented. A controlled fixture would prove only its own mechanism, not company VPN compatibility. See [vpn-stage-readiness.md](linux-docker-trial/vpn-stage-readiness.md).
+- Execution status: **NOT RUN**. Preserve retained LD01 resources and historical evidence; reconcile their exact baseline before later reuse. The controlled VPN implementation is follow-on work, with fresh lab credentials kept outside Git. The historical company-session window is not a rolling authorization for future execution.
+- Evidence status: LD01-T/LD01-F and the `2026-10-19T15:38:37Z` bounded material checks are prior **PASS** results, not new checks or VPN acceptance. No baseline rerun, credential access, private config adaptation, credential mount, container recreation or VPN connection occurred in this session. LD01-J/LD01-C and S1–N3 VPN/account checks remain **BLOCKED/NOT RUN**.
+- Git handling: user explicitly requested committing and pushing this continuation handoff and opening a PR. Stage only these redacted handoff updates. Prior branch-specific authorization below is historical. Credentials and private generated evidence remain outside Git.
+
+## Previous task record — historical authorization and evidence
+
+The following records the prior preparation session; references to “this session” below refer to that owner, not the continuation above.
 
 - Owner: OpenCode — Linux Docker trial preparation session, 2026-10-19.
 - Branch: `docs/linux-docker-trial-preparation`.
