@@ -70,3 +70,136 @@ The proposed controlled OpenVPN fixture would use fresh lab credentials and its 
 Retained LD01 reuse acknowledgement remains scoped as recorded above. Preserve existing labels and reconcile the exact retained baseline before runtime changes. The fixture, if implemented and tested, would prove only the controlled setup's mechanism; it would not establish company-server acceptance, company DNS/routing compatibility or account-sharing acceptance. No new trial result is claimed.
 
 User requested committing/pushing the existing handoff work and opening a PR before proceeding with implementation. This branch records coordination and the changed scope only; controlled VPN setup remains follow-on work.
+
+### Controlled lab planning after merged PR #3
+
+The user confirmed the handoff PR was merged. Fetched `origin/main` at `7e37565174b54105293c75c214c0b8b97202ff21` contains it; a clean `feat/controlled-vpn-trial` worktree was created. Current ownership and scope are at [task-owner.md](../task-owner.md), with the [draft implementation spec](../implementation-artifacts/spec-controlled-vpn-trial.md).
+
+Read-only IAP inspection confirms Debian 12, sudo/TUN availability and observed capacity for a small stock-client fixture. The VM has public IPv6 and no public IPv4; its network currently allows IAP SSH only. LD01 A/B remain running on the frozen image with their recorded mount layout and baseline capabilities; full private-evidence reconciliation is still required before mutation. A host IPv6 route exists, but the retained Docker networks are IPv4-only.
+
+Proposed transport is controller-managed IAP/SSH TCP forwarding, avoiding a new public IPv4/ingress rule. The generated client profile requires the forward; this is not a portable public-endpoint profile or native UDP test. A local VM is not required for this proposal. Approval of the draft spec is pending; no server/client configuration, packages, credentials, firewall rules or VPN connections have been changed. No company material was accessed.
+
+### Controlled lab implemented and exercised — 2026-10-19 UTC
+
+The planning checkpoint above is historical. The user approved the controlled spec
+and execution at `2026-10-19T21:43:21Z`, with a fixed maximum-three-hour deadline
+`2026-10-20T00:43:21Z`. [Controlled results](controlled-vpn-results.md) record
+implementation, the exact invocation, private evidence and resource disposition.
+
+**Historical observed PASS — original controlled IPv4 OpenVPN/IAP run and cleanup only.** Execution ran
+`21:53:15Z`–`21:54:56Z`; both persistent UID/GID-1001 A shells resolved
+`service.ld01.test` and reached the fixture in both controller-mediated cycles.
+Host/B could not reach the private services directly. Their held heartbeat sockets
+retained their identities with 43/42 sequenced acknowledgements and no reconnects
+or errors; host/B route/rule/resolver state stayed unchanged.
+
+Actual client/server versions are OpenVPN 2.6.19/2.6.14; server DNS is dnsmasq 2.90.
+Fresh lab PKI verifies exact TLS peer names with explicit SHA256. A's daemon is
+root with only its existing NET_ADMIN capability; actual material access and
+running capabilities were checked. No A recreation or SETUID/SETGID additions were
+needed. A-only scoped IPv6 traffic blocking and port-53 DNS restrictions accompany
+the lab resolver. Exact A resolver/routes/rules/IPv6 state restored on both stops;
+task forwards, client material and task VM services were cleaned up.
+
+Private profile: `/tmp/opencode/controlled-vpn-20261019T2153Z/client.ovpn` (0600,
+parent 0700). It requires controller-managed forwarding/lifecycle, and the task
+services are stopped now. VM packages, private PKI/config/audit/rollback and source
+upload were retained as listed in results. The original source passed nine regression
+checks, Bash syntax and whitespace checks. No company credentials, profile or staging were accessed.
+
+Historical company material-readiness checks are not controlled-lab prerequisites
+or new acceptance. Company/native-UDP/full-tunnel/live-IPv6/account/S1–N3 tests
+remain **NOT RUN**; LD01-J/LD01-C company/account acceptance remains unestablished.
+The IAP heartbeat proves only that controlled non-VPN path, and controller actions
+do not prove restricted daily connect/disconnect permissions.
+
+### Historical review-fix checkpoint — before fresh authorization
+
+Independent review completed with logged findings and source fixes. It is not
+pending. The original fixed `2026-10-20T00:43:21Z` deadline expired; at this checkpoint
+patched-source live validation and both repeat cycles required a fresh explicit
+window. That blocker is resolved by the separately authorized run below. Coordinating offline verification completed at
+`2026-10-20T07:25Z`: all 31 sandbox tests, Bash syntax and tracked/untracked
+whitespace checks passed. Any live repeat requires new authorization. This patch performs no deployment, reconnection,
+runtime mutation or rewrite of original evidence/deployed copies.
+
+Source fixes cover retryable cleanup with retained failed-attempt evidence/journals
+and explicit restoration PASS before material deletion; independent resolver
+recovery despite netfilter failures; shared/cancelled/bounded server setup/rollback;
+generation-locked A actions, atomically registered/gated daemon and forward startup,
+explicit watcher retirement/join, independent lease renewal and zombie detection.
+Thirty-one focused sandbox tests and Bash syntax pass, including automatic watcher
+triggers, race/deadline guards, TERM-to-KILL escalation and tunnel deletion.
+
+Review confirmed the original destination-port-53 filter can be bypassed by Docker
+embedded-resolver DNAT to high ports. Revised source matches the original conntrack
+DNS tuple and preserves prior filter/nat rule configuration. Future connected
+checks include explicit UDP **and TCP** embedded-resolver negatives alongside
+working lab DNS, plus TCP DNS negatives on host/B. These had **not run at the
+offline checkpoint**; the fresh run below now provides the added live observations.
+
+B8 historical endpoint drift comparison is **deferred, medium/unverified**: the
+retained baseline lacks original endpoint IP/MAC/gateway values. Current endpoint
+snapshots cannot create that historical baseline. Existing packages/private lab
+material/evidence and last observed resource disposition are retained as recorded
+in [controlled results](controlled-vpn-results.md); the later fresh disposition follows.
+
+### Fresh revised-source live verification — 2026-10-20 UTC
+
+**PASS — both revised-source cycles and scoped cleanup**, with explicit defunct-PID
+residuals below. User receipt `2026-10-20T07:31:09Z`; fixed hard stop
+`2026-10-20T10:31:09Z` including cleanup. All 31 sandbox regressions and Bash
+syntax passed before deployment with `PYTHONDONTWRITEBYTECODE=1`. Original retained
+A/B resources reconciled, including exact comparison with the original controlled
+live run's full endpoints. No source/context drift or overlapping controller was
+observed; no original task listener/daemon/tunnel/unit remained.
+
+Exact live invocation:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 _bmad-output/linux-docker-trial/controlled-vpn/trial.py \
+  --private-dir /tmp/opencode/controlled-vpn-20261020T0736Z-attempt1
+```
+
+Exit 0, task `cvpn152283967635`; started `07:34:59.838456Z`, finished
+`07:36:40.236169Z`; cleanup PASS at `07:36:31.392240Z`. Cycle 1:
+`07:35:49.989077Z`–`07:36:07.179645Z`; cycle 2:
+`07:36:07.179675Z`–`07:36:24.377179Z`. Both same UID/GID-1001 joined shells passed
+private DNS/HTTP in each cycle. Explicit embedded-resolver UDP/TCP negatives passed
+while lab DNS worked. Host/B HTTP and UDP/TCP DNS negatives passed. Held host/B
+sockets retained identity with **53/52 acknowledgements**, zero reconnects/errors.
+Exact A resolver/routes/rules/filter/nat/IPv6 state restored after each stop;
+host/B state and all retained container configuration/endpoints stayed unchanged.
+
+New private profile: `/tmp/opencode/controlled-vpn-20261020T0736Z-attempt1/client.ovpn`;
+same directory contains evidence, cleanup/rollback state, logs and post-run audits.
+Directory 0700, files 0600. Fresh profile and CA differ from the original lab;
+the original profile/evidence hashes and old VM rollback hash/mtime are preserved.
+No trial implementation correction, failed live connection/deployment, or live
+repeat was needed. No company material or live fault injection was used.
+
+Audit dispositions remain private and are fully listed in controlled results:
+an initial preflight audit self-matched its inspection command (FAIL), corrected
+preflight passed, the live run passed, a post-audit's name-only check flagged dead
+OpenVPN entries (FAIL), then a state-aware post-audit passed all 19 checks.
+Both failed audit records are retained; acceptance was not weakened.
+
+No active task VPN/watcher/forward/tunnel/VM listener/unit remains; A material and
+task unit files were removed. **Residuals:** four A entries in state Z, all parent
+PID 1: watcher PIDs 1006/1294 and OpenVPN PIDs 1037/1325. They are terminated,
+without live sockets/tunnels, and unreaped by A's unchanged `sleep infinity` PID 1.
+No restart/recreation was performed. Retained VM lab directories are
+`/var/lib/ld01-cvpn-cvpn7a1a8819b397`, `/var/lib/ld01-cvpn-cvpn152283967635`,
+`/tmp/ld01-upload-cvpn7a1a8819b397`, `/tmp/ld01-upload-cvpn152283967635`.
+Six original native packages, their managed directories and apt/dpkg state remain;
+this run changed zero package versions. New upload is cancelled; old scripts are
+unchanged. Exact directories and inventory are in [controlled results](controlled-vpn-results.md).
+
+The execution blocker is resolved. Coordinating evidence verification passed via
+`python3 /tmp/opencode/controlled-vpn-final-proof.py`; spec is `done`. The proof
+checks raw cycle/socket/audit evidence, cleanup/deadline, private permissions and
+unchanged current implementation/original-evidence hashes. B8 historical endpoint comparison remains deferred/unverified:
+the newer full-endpoint comparison does not manufacture the missing earlier
+baseline. Company/native-UDP/full-tunnel/live-IPv6/account/S1–N3 and restricted
+daily-control acceptance remain unclaimed; heartbeat scope is the controlled
+IAP-forwarded non-VPN path only. No commit/push/PR was performed.
