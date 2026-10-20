@@ -1,5 +1,27 @@
 # N2 — controlled VPN failure containment and recovery
 
+## Latest — cleanup fix integrated; fresh read-only admission complete
+
+- User approved committing/checkpointing/integration and exclusive read-only
+  admission. Fix checkpoint `cf114ce`, exact preparation checkpoint `54afe9d`,
+  integrated source `62c6da520f827b00d4b10b53b3fcba6c70e67946`. The owner-document
+  conflict was paused, then resolved with separate user approval to preserve both
+  handoffs. All three other preparation documents and existing bytecode unchanged.
+- Integrated **116 tests PASS in 38.906 seconds, no skips**; Bash syntax, CLI help
+  and whitespace PASS. Five source/test hashes match the reviewed fix.
+- Fresh metadata-only admission: **85 successful checks** across preserved local
+  and VM evidence under `/home/rat/.local/state/termux-vm-private/`. Accepted home
+  reference/configuration/residuals/retained VM metadata match. Reader failures and
+  separately approved continuations are disclosed in the linked handoff; no failed
+  command is treated as successful absence. No new baseline adopted.
+- [Integration, hashes, evidence and remaining execution gates](linux-docker-trial/detached-cleanup-integration-readiness.md).
+  User confirmed `2026-10-20T22:45:00Z`–`23:15:00Z` for **preparation only**,
+  cleanup begins by `23:05Z`, launch/deploy/capture strictly before `23:00Z`.
+  Operator sudo, fresh in-window admission and explicit live permission remain
+  pending. User approved committing this handoff and pushing only the diagnostic
+  branch. No executable authorization/attempt, capture, VPN or runtime mutation.
+  Historical baseline FAIL / cleanup PASS remain unchanged.
+
 **Next validation preparation:** [offline readiness and three separate gates](linux-docker-trial/baseline-dns-validation-readiness.md).
 Published source `2293a9943a570ff627e07856581d3fea2f2df85f` inspected; fresh
 **98 offline tests PASS**. No runtime inspection, new reference acceptance or
