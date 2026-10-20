@@ -7,6 +7,7 @@ import os
 import select
 import socket
 import socketserver
+import struct
 import subprocess
 import sys
 import time
@@ -52,6 +53,108 @@ class Identity(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass
+
+
+def dns_reply(packet, ipv4):
+    """Bounded lab-only DNS: one plain question, optional EDNS, no resolver calls."""
+    if not 12 <= len(packet) <= 512:
+        raise ValueError("DNS packet length")
+    ident, flags, questions, answers, authority, additional = struct.unpack('!6H', packet[:12])
+    if flags & ~0x0130 or (questions, answers, authority) != (1, 0, 0) or additional > 1:
+        raise ValueError("DNS query header")
+    offset, labels = 12, []
+    while True:
+        if offset >= len(packet): raise ValueError("truncated DNS name")
+        size = packet[offset]
+        offset += 1
+        if size == 0: break
+        if size > 63 or offset + size > len(packet): raise ValueError("DNS label")
+        labels.append(packet[offset:offset + size].lower())
+        offset += size
+    if offset - 12 > 255 or offset + 4 > len(packet):
+        raise ValueError("DNS question length")
+    kind, klass = struct.unpack('!HH', packet[offset:offset + 4])
+    offset += 4
+    question = packet[12:offset]
+    opt = b''
+    if additional:
+        # Validate EDNS options locally; advertise only our bounded response size.
+        if offset + 11 > len(packet) or packet[offset:offset + 3] != b'\0\0)':
+            raise ValueError("DNS additional record")
+        edns_flags = struct.unpack('!I', packet[offset + 5:offset + 9])[0]
+        if edns_flags & ~0x8000:
+            raise ValueError("DNS OPT header")
+        length = struct.unpack('!H', packet[offset + 9:offset + 11])[0]
+        offset += 11
+        end = offset + length
+        if end != len(packet): raise ValueError("DNS OPT length")
+        while offset < end:
+            if offset + 4 > end: raise ValueError("DNS option header")
+            length = struct.unpack('!H', packet[offset + 2:offset + 4])[0]
+            offset += 4 + length
+            if offset > end: raise ValueError("DNS option length")
+        opt = b'\0' + struct.pack('!HHIH', 41, 512, edns_flags, 0)
+    if offset != len(packet): raise ValueError("DNS trailing data")
+    response_flags = 0x8000 | (flags & 0x0100)  # QR/RD only; recursion unavailable.
+    if klass != 1 or kind not in (1, 28) or len(labels) < 3 or labels[-2:] != [b'ld01', b'test']:
+        return struct.pack('!6H', ident, response_flags | 5, 1, 0, 0, additional) + question + opt
+    response_flags |= 0x0400  # Authoritative for every private wildcard label.
+    if kind == 1:
+        record = b'\xc0\x0c' + struct.pack('!HHIH', 1, 1, 0, 4) + ipv4
+        return struct.pack('!6H', ident, response_flags, 1, 1, 0, additional) + question + record + opt
+    zone = b'\x04ld01\x04test\0'
+    soa = b'\x02ns' + zone + b'\x0ahostmaster' + zone + struct.pack('!5I', 1, 60, 60, 300, 0)
+    record = zone + struct.pack('!HHIH', 6, 1, 0, len(soa)) + soa
+    return struct.pack('!6H', ident, response_flags, 1, 0, 1, additional) + question + record + opt
+
+
+class DNSUDP(socketserver.BaseRequestHandler):
+    def handle(self):
+        packet, sock = self.request
+        try:
+            sock.sendto(dns_reply(packet, self.server.ipv4), self.client_address)
+        except (ValueError, OSError):
+            pass  # Malformed datagrams are dropped; the service stays alive.
+
+
+class DNSTCP(socketserver.BaseRequestHandler):
+    def handle(self):
+        deadline = time.monotonic() + 2
+        def read(size):
+            data = b''
+            while len(data) < size:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0: raise ValueError("DNS frame deadline")
+                self.request.settimeout(remaining)
+                chunk = self.request.recv(size - len(data))
+                if not chunk: raise ValueError("truncated DNS frame")
+                data += chunk
+            return data
+        try:
+            size = struct.unpack('!H', read(2))[0]
+            if not 12 <= size <= 512: raise ValueError("DNS frame length")
+            reply = dns_reply(read(size), self.server.ipv4)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0: return
+            self.request.settimeout(remaining)
+            self.request.sendall(struct.pack('!H', len(reply)) + reply)
+        except (ValueError, OSError):
+            pass  # One bounded request per connection; socketserver closes it.
+
+
+class DNSTCPServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def dns(host, port):
+    ipv4 = socket.inet_pton(socket.AF_INET, host)
+    with DNSTCPServer((host, port), DNSTCP) as tcp, \
+            socketserver.UDPServer(tcp.server_address, DNSUDP) as udp:
+        tcp.ipv4 = udp.ipv4 = ipv4
+        while True:
+            for server in select.select([udp, tcp], [], [])[0]:
+                server.handle_request()
 
 
 def hold(host, port, fault=False):
@@ -231,12 +334,14 @@ def shell():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("http", "heartbeat", "hold", "fault-hold", "shell", "fresh"))
+    parser.add_argument("mode", choices=("http", "dns", "heartbeat", "hold", "fault-hold", "shell", "fresh"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=19090)
     parser.add_argument("--fixture", default="ld01-controlled")
     args = parser.parse_args()
-    if args.mode == "fresh":
+    if args.mode == "dns":
+        dns(args.host, args.port)
+    elif args.mode == "fresh":
         emit(fresh(args.host, args.port))
     elif args.mode in ("hold", "fault-hold"):
         hold(args.host, args.port, args.mode == "fault-hold")

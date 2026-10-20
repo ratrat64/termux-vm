@@ -183,26 +183,12 @@ for entry in 'ca ca.crt' 'cert client.crt' 'key client.key' 'tls-crypt tls-crypt
     cat "$file" >> client.ovpn
     printf '</%s>\n' "$tag" >> client.ovpn
 done
-cat > dns.conf <<EOF
-listen-address=$server
-bind-interfaces
-port=53
-no-hosts
-no-resolv
-no-poll
-local=/ld01.test/
-host-record=service.ld01.test,$server
-address=/ld01.test/$server
-cache-size=0
-user=root
-group=root
-EOF
 for service in vpn http dns heartbeat vpnheartbeat; do
     cleanup_reserve
     case $service in
         vpn) command="/usr/sbin/openvpn --config $root/server.conf"; after=network.target ;;
         http) command="/usr/bin/python3 $root/fixtures.py http --host $server --port 8080 --fixture $task"; after="$prefix-vpn.service" ;;
-        dns) command="/usr/sbin/dnsmasq --keep-in-foreground --conf-file=$root/dns.conf"; after="$prefix-vpn.service" ;;
+        dns) command="/usr/bin/python3 $root/fixtures.py dns --host $server --port 53"; after="$prefix-vpn.service" ;;
         heartbeat) command="/usr/bin/python3 $root/fixtures.py heartbeat --host 127.0.0.1 --port 19090"; after=network.target ;;
         vpnheartbeat) command="/usr/bin/python3 $root/fixtures.py heartbeat --host $server --port 19091"; after="$prefix-vpn.service" ;;
     esac
@@ -241,6 +227,8 @@ python3 - "$task" "$subnet" "$server" "$deadline" <<'PY' > server.json
 import json, subprocess, sys
 task, subnet, server, deadline = sys.argv[1:]
 print(json.dumps(dict(task=task, subnet=subnet, server=server, deadline=deadline,
+    dns_backend='fixtures.py:dns', python_executable='/usr/bin/python3',
+    python=subprocess.check_output(['/usr/bin/python3', '--version'], text=True).strip(),
     openvpn=subprocess.check_output(['openvpn', '--version'], text=True).splitlines()[0],
     dnsmasq=subprocess.check_output(['dnsmasq', '--version'], text=True).splitlines()[0])))
 PY

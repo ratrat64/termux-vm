@@ -1,5 +1,10 @@
 # Baseline-only diagnostic — first live result
 
+**Latest offline follow-up:** the missing-AA AAAA fixture mismatch is diagnosed
+and fixed without changing acceptance; **98 tests PASS**, independent review
+complete. [Diagnosis and verification](#offline-dns-fixture-fix--2026-10-20).
+The live FAIL and cleanup PASS below remain historical verdicts.
+
 **Current result: baseline FAIL; supervised cleanup PASS.** The user authorized
 the exact baseline-only scope and launched one attempt from their authenticated
 terminal at `2026-10-20T14:07:06Z`, with cleanup by `14:27:06Z` and hard stop
@@ -150,3 +155,64 @@ preflight; its synthetic fixture was fixed, with PASS/cleanup assertions retaine
 **No live verdict is established.** The original probe failure's exact cause is
 still unknown. This change prepares diagnostics to expose it; passing offline
 checks does not claim the original DNS/HTTP baseline is fixed.
+
+## Offline DNS fixture fix — 2026-10-20
+
+**Offline implementation verified; the original live baseline remains FAIL.**
+Both retained shell-probe results and stage stderr identify the same bounded
+fixture incompatibility: lab A replies contain AA and the exact IPv4 address;
+lab AAAA replies are NOERROR/NODATA but omit AA. Embedded UDP/TCP queries receive
+no reply. Replaying that response shape through the unchanged worker fails only
+the two lab AAAA predicates at `validate-dns-baseline`. This establishes this
+baseline-only failure's cause, not equivalence to the earlier stderr-lost failure.
+Raw attempt evidence was read only and remains outside Git at its original path.
+
+`controlled-vpn/fixtures.py` now has a stdlib, non-forwarding authoritative DNS
+mode, bound only to its supplied numeric IPv4 address over UDP and TCP. Unique
+private labels receive one exact A record or authoritative AAAA NOERROR/NODATA
+with a local SOA. Other domains/classes/types are refused. It bounds messages to
+512 bytes, accepts one uncompressed question and a validated optional EDNS OPT,
+returns a minimal response OPT for EDNS queries, drops malformed datagrams, and
+closes malformed/incomplete TCP frames within a two-second total request
+deadline. TCP uses stdlib daemon threads so incomplete frames do not block UDP
+or other TCP queries. Address reuse is enabled before binding, allowing immediate
+restart on the same address/port after a completed query.
+
+The existing DNS systemd unit now invokes the already-uploaded Python fixture on
+the tunnel address, port 53. Unit names, ordering, deadlines, rollback, retained
+package prerequisites/inventory and upload/cleanup paths are preserved.
+`server.json` identifies the active `fixtures.py:dns` backend and its
+`/usr/bin/python3` executable/version alongside retained dnsmasq/OpenVPN versions.
+Probe and controller predicates, containment and abort behavior were not changed.
+
+Initial implementation verification: **93 tests PASS in 25.993 seconds, no skips**, including six new
+DNS checks: saved-shape failure reproduction; negative baseline acceptance;
+actual CLI loopback UDP/TCP `dig` through the unchanged probe; exact wire answers,
+SOA and refusal behavior; malformed datagrams/framing, fragmented valid TCP and
+timeout/survival; service wiring. Application DNS, HTTP, direct canary and embedded
+resolver I/O in the probe integration are synthetic; only the lab DNS uses real
+disposable loopback sockets/processes.
+
+Review corrections: **19 focused tests PASS in 16.910 seconds, no skips**
+(`DNSFixtureTests`, `FaultFixtureTests`, `ServerLifecycleTests`); Bash syntax and
+whitespace checks pass. Added regression proofs cover healthy UDP/TCP during an
+incomplete TCP frame, immediate fixed-port restart, EDNS/plain replies, exact
+UDP/TCP answers on `127.0.0.2`, paced incomplete frames that distinguish the
+absolute deadline from an idle timeout, delayed valid fragmentation and subsequent
+service health, and active DNS/Python metadata. The concurrency, restart, OPT
+and metadata checks reproduced their respective failures before correction.
+Final coordinating verification: **98 tests PASS in 27.272 seconds, no skips**;
+Bash syntax and whitespace PASS. Three independent BMAD review layers completed
+in separate worktrees. Every finding has a recorded disposition in the spec;
+all accepted corrections are verified, nothing deferred. Redundant portable
+fallback handoffs were replaced by actual reviews.
+
+No Docker/GCP/VPN operations, deployment, live retry, baseline adoption, package
+changes, resource recreation/deletion, commit or push occurred. Historical FAIL,
+cleanup PASS, the two recorded A zombies, retained VM material and all private
+evidence retain their prior dispositions; runtime state was not re-inspected.
+There is no new live verdict. A later live attempt remains separately authorized.
+
+After offline completion, the user separately authorized committing/pushing this
+verified fix on the existing task branch. The no-commit/push statement above
+describes offline implementation; publication does not authorize a live retry.

@@ -1,5 +1,9 @@
 # N2 — controlled VPN failure containment and recovery
 
+**Latest follow-up:** [offline DNS fix](#follow-up--offline-baseline-dns-fixture-fix-2026-10-20)
+diagnosed the missing-AA AAAA mismatch; **98 offline tests PASS**, independent
+review complete. Fix publication authorized; original live FAIL remains.
+
 ## Latest — authorized baseline-only attempt FAIL; supervised cleanup PASS
 
 - User explicitly authorized the prepared baseline-only scope, scoped capture,
@@ -205,3 +209,48 @@ The following records the prior preparation session; references to “this sessi
 - Evidence/status record: [readiness.md](linux-docker-trial/readiness.md).
 - Private evidence: `/tmp/opencode/linux-docker-sharing-ld01.r9oRt6uM/` outside Git. Runnable source: `linux-docker-trial/tooling/Dockerfile` and `linux-docker-trial/spot-check.py`.
 - Git handling: user explicitly authorized committing the trial source and redacted handoff/results and pushing `docs/linux-docker-trial-preparation`. No PR requested. Credentials, token-bearing state and raw/private generated evidence stay outside Git; stage only the reviewed task artifacts.
+
+## Follow-up — offline baseline DNS fixture fix, 2026-10-20
+
+- Owner OpenCode; branch `fix/n2-baseline-diagnostic`, same durable worktree.
+  Checkpoint `84d21ccf9e92c63eeafb7408f1042318f3a9c1eb` is already published;
+  this subsequent fix is prepared for authorized commit/push. The frozen approved intent in
+  [DNS fixture spec](implementation-artifacts/spec-baseline-dns-fixture-fix.md)
+  is preserved; its `context:` list was empty.
+- Diagnosis from both retained probe results/stderr: lab AAAA NOERROR/NODATA lacks
+  required AA; lab A is correct and embedded DNS gives no reply. Synthetic
+  saved-shape replay reproduces only the lab UDP/TCP AAAA failures at the recorded
+  worker stage. This does not establish the older stderr-lost failure's cause.
+- Added bounded stdlib authoritative/non-forwarding UDP/TCP DNS to the existing
+  fixture and wired the existing DNS unit to the tunnel address/53. Exact private
+  A and authoritative AAAA NODATA/SOA pass the unchanged probe. Bad answers,
+  missing AA, error status and embedded replies still fail. Malformed input is
+  bounded/dropped or closed; each TCP request has a two-second absolute deadline.
+  Review corrections use stdlib daemon TCP threads to keep UDP/other TCP queries
+  responsive, enable pre-bind address reuse for immediate restart, and return
+  minimal EDNS response OPT records. `server.json` now identifies the active
+  `fixtures.py:dns` backend and Python executable/version while retaining package
+  version evidence.
+  Probe/controller acceptance, containment, abort, lifecycle and packages remain
+  intact. No new dependency or package operation.
+- Initial implementation: **93 offline tests PASS in 25.993 seconds, no skips.**
+  Six new DNS tests use synthetic saved-shaped I/O and disposable
+  loopback fixture processes/ports; real lab `dig` traverses the unchanged probe.
+  Other probe dependencies are mocked. Review corrections: **19 focused tests PASS
+  in 16.910 seconds, no skips; Bash syntax and whitespace PASS.** Regression proofs
+  add concurrent incomplete-TCP/healthy-UDP/TCP, fixed-port restart, EDNS/plain
+  responses, exact-wire `127.0.0.2` answers, paced absolute-deadline enforcement,
+  delayed valid fragmentation/subsequent health, and active DNS/Python metadata.
+  Final coordinating verification: **98 tests PASS in 27.272 seconds, no skips**;
+  Bash syntax and whitespace PASS. Three independent review layers completed in
+  separate worktrees; all accepted corrections verified, nothing deferred.
+  Portable fallback handoffs were replaced by actual reviews. Spec is `done` for
+  offline diagnosis/implementation/review only, with no new live acceptance.
+- **Original live baseline FAIL and cleanup PASS remain unchanged.** No new live
+  verdict, retry, adoption or Docker/GCP/VPN operation. Two recorded A zombies,
+  retained VM PKI/audit/source, private attempt evidence and original resources
+  retain their documented dispositions; none was re-inspected or mutated.
+  [Appended diagnosis/verification](linux-docker-trial/baseline-diagnostic.md#offline-dns-fixture-fix--2026-10-20).
+- After offline completion, the user's subsequent “proceed” authorized publishing
+  this verified fix on the existing task branch. This supersedes the earlier
+  uncommitted/unpushed disposition only; no live operation or PR is authorized.
