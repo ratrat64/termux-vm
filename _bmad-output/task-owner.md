@@ -1,4 +1,157 @@
-# Controlled VPN trial on GCP
+# N2 — controlled VPN failure containment and recovery
+
+## Latest — authorized baseline-only attempt FAIL; supervised cleanup PASS
+
+- User explicitly authorized the prepared baseline-only scope, scoped capture,
+  exclusive LD01 reuse and supervised transient-file cleanup, then launched from
+  their authenticated terminal. Fixed window: `2026-10-20T14:07:06Z`–`14:37:06Z`,
+  cleanup by `14:27:06Z`. This single attempt is complete; no retry is authorized.
+- Task `cvpn309ee7be4837`; controller `14:07:06.328692Z`–`14:08:18.294694Z`.
+  **Baseline FAIL:** both joined shells report `validate-dns-baseline`,
+  `positive DNS/embedded rejection mismatch`. Partial probe responses and private
+  stage diagnostics survived. Lab UDP/TCP A answers succeeded; UDP/TCP AAAA
+  responses were NOERROR with no answers. This identifies the failed stage and
+  observations, not yet the root cause or proof of the historical failure's cause.
+- **Cleanup PASS** at `14:08:07.927968Z`, no cleanup errors. A restoration PASS;
+  final controller checks found no A/host/B route/rule/resolver or retained
+  container configuration/endpoint drift. Capture stopped: 92 captured/received,
+  zero kernel drops. Final VM evidence lists no task units or task listeners.
+- **Residuals:** A contains state-Z python3 PID 198 and openvpn PID 219, parent
+  PID 1. These are defunct children, not active VPN processes; no container restart
+  or recreation was performed. The accepted zero-zombie input is now historical
+  and must not be reused unchanged for another admission. New VM PKI/audit/source
+  and private attempt evidence remain retained; historical material is preserved.
+- Private approval: `/home/rat/.local/state/termux-vm-private/baseline-live-20261020T140706Z-approval/authorization.json`.
+  Private evidence: `/home/rat/.local/state/termux-vm-private/baseline-live-20261020T140706Z-attempt1/`.
+- No injection/reconnect, company material, retained-resource recreation/deletion,
+  or second controller. Follow-up here read only the attempt files; no independent
+  Docker/GCP audit or runtime cleanup retry was run. Offline verification remains
+  the prior 87-PASS result; source remains uncommitted in this worktree.
+
+## Latest — user accepted baseline; private inputs prepared, no live approval
+
+- User explicitly accepted the inspected post-reboot running reference and asked
+  for private inputs only; receipt `2026-10-20T13:48:45Z` (not an execution window).
+- Private baseline directory:
+  `/home/rat/.local/state/termux-vm-private/baseline-20261020T134845Z/`, mode 0700,
+  all ten JSON files 0600. Includes resources/image/runtime/full-endpoint metadata,
+  exact current network/NAT observations, zero-zombie/retained-journal residuals,
+  input paths and adoption/provenance hashes. Prior inventories remain unchanged.
+- Local schema, saved-snapshot reconcile, network/peer and permission checks PASS;
+  no runtime commands, credentials, live approval file/window or attempt created.
+- Accepted differences are new empty scratch, current endpoints/Docker DNS NAT,
+  zero zombies and retained inactive PASS/off A journal. This is a new reference,
+  not recovered historical evidence; B8 and the old baseline probe cause remain
+  unresolved. Current runtime state was not re-inspected during this preparation.
+- Next gate: fresh explicit baseline-only live authorization (max 30 minutes with
+  ten-minute cleanup reserve), separate from acceptance. No VPN or diagnostic ran.
+- [Private input manifest and validation](linux-docker-trial/baseline-adopted.md).
+
+## Latest — authorized scratch replacement/original A/B start, adoption pending
+
+- User approved new empty scratch at the existing LD01 bind path and starting
+  the original A/B, followed by inspection only. No VPN/diagnostic authorization.
+- Completed `2026-10-20T13:44:59Z`–`13:45:00Z`: original A/B running, IDs/image/
+  Config/HostConfig/mounts/home-volume metadata preserved. New scratch is empty,
+  0700/1001:1001; old scratch contents remain lost. Docker network IDs unchanged.
+- Private inventory: `/home/rat/.local/state/termux-vm-private/start-originals-20261020T134459Z/`.
+  Earlier `start-originals-20261020T134426Z` preserves a pre-mutation mount-order
+  guard failure; keyed comparison proved no actual mount drift.
+- **46 reconciliation checks PASS.** No VPN process/tunnel/zombie entries; A has
+  no task chains and its resolver/routes/rules/filter match surviving restore
+  metadata. Docker embedded DNS NAT high ports regenerated; exact new state recorded.
+- A retained `/run/ld01-cvpnb76f5884442f` journal remains inactive, cleanup PASS,
+  intent off; hashes captured without deleting/editing material. B firewall reads
+  unavailable by design (no NET_ADMIN); original raw helper false check is qualified
+  in separate offline assessment. No extra privileges or GCP mutation occurred.
+- **No baseline adopted.** Await explicit acceptance of the new running reference
+  before generating baseline inputs; a later diagnostic still needs a fresh window.
+- [Running-state report](linux-docker-trial/originals-started.md).
+
+## Latest — authorized read-only post-reboot inventory, no baseline adopted
+
+- Inspection completed 2026-10-20 at `13:34Z` under explicit user authorization;
+  source/owner branch remains `fix/n2-baseline-diagnostic` in this durable worktree.
+- Private inventory: `/home/rat/.local/state/termux-vm-private/inspection-20261020T133405Z/`
+  (0700; files 0600). Earlier `inspection-20261020T133251Z` preserves failed strict
+  SSH host-key lookup; selecting the existing Google Compute known-hosts file
+  allowed read-only GCP inspection, with no trust/key-policy change.
+- **41 source comparisons match; three observed differences:** original A and B
+  are stopped (exit 137, finished `12:42:39Z`), and the historical shared scratch
+  host directory is missing. Original container IDs, image, homes, documented
+  runtime settings/capabilities/devices/labels and network configuration remain.
+- No known task VPN process/tunnel/VM service/listener or host forward listener
+  remains active. VM retained packages and all three task-directory sets remain;
+  12 disposition/permission checks pass. No credentials/profiles were opened.
+- Current in-container state/zombies/journals are unavailable while stopped.
+  Historical full-metadata/endpoint equality remains unverified due to lost private
+  evidence. **No baseline adopted**, no new execution approval file/window made.
+- User decision required for missing scratch data/path and any start of the
+  original stopped containers. None was started, restarted, recreated or deleted;
+  no VPN connection/deployment/capture occurred. Company material untouched.
+- [Redacted findings and exact scope](linux-docker-trial/post-reboot-inspection.md).
+
+## Current task — recovered source, offline baseline-only diagnostic
+
+- Owner: OpenCode, 2026-10-20; branch `fix/n2-baseline-diagnostic`.
+- Durable worktree: `/home/rat/Git/termux-vm-n2-baseline-diagnostic`, base
+  `dc1a192619471c74692833e65122d4fa4ebeeec1`.
+- User authorized offline preparation/verification only. No live window is open;
+  all earlier timestamps below are expired historical records. No commit/push.
+- Source recovery replayed 105 successful recorded source patches into eight
+  implementation/test/doc files. Recovered trial.py matches independent blob
+  `3033de41d7693bfe0e688f9c0b9f1e7e70166446`; all 76 recovered tests passed.
+- **Private raw evidence, credentials and baseline metadata were not recovered.**
+  The restored summaries below record earlier observations, not current proof or
+  files guaranteed to exist. Do not infer current resources/zombies from them.
+- Baseline-only mode prepares one connection/check/off with staged private errors,
+  disables injection, and requires durable external evidence paths plus explicitly
+  reconciled current metadata/residuals. Missing metadata fails before external
+  commands. No automatic adoption/deletion of retained resources is permitted.
+- [Diagnostic implementation/readiness](linux-docker-trial/baseline-diagnostic.md)
+  and [task spec](implementation-artifacts/spec-n2-baseline-diagnostic.md).
+- During this task no Docker/GCP/resource inspection, connection, deployment,
+  capture or fault injection occurred. Future read-only post-reboot reconciliation
+  and any live test need separate approval. Company VPN material remains forbidden.
+- Offline preparation complete: **87 tests PASS in 15.202 seconds**, no skips;
+  Bash syntax, CLI help and whitespace checks pass. No live approval file/window
+  was created. Diagnostic spec is done for offline preparation only; historical
+  N2 live acceptance remains incomplete. Changes are uncommitted in this durable
+  worktree; the main checkout and stale worktree metadata were left intact.
+
+## Recovered historical N2 handoff — pre-reboot observations only
+
+**Latest disposition — operator attempt 1 FAIL, halted:** task `cvpnb76f5884442f`,
+`2026-10-20T10:42:01.745910Z`–`10:43:15.924575Z`. Verified VPN initialized, but
+positive-baseline worker exited before injection. **F1/F2 NOT RUN.** A restoration
+PASS at `10:42:53.617213Z`; original overall cleanup FAIL on a blank capture line.
+Read-only `post-attempt-audit.json` passes all 20 restoration/resource/inactive-task
+checks. No VPN/tunnel/forward/capture/VM task service remains active. New A zombie
+PIDs 1923/1944 join four historical zombies; root A material and new VM audit/PKI/
+source remain retained. No restart/recreation or cleanup retry. Private evidence:
+`/tmp/opencode/n2-20261020T103830Z-attempt1/`. Executed source archived privately
+before offline parser/error-retention fixes; 76 sandbox tests pass. Primary worker
+cause remains unknown because original stderr was discarded. New admission must
+reconcile six disclosed zombies/journals and receive fresh scope/window approval;
+do not rerun the old command. [Detailed verdict/evidence](linux-docker-trial/n2-results.md#operator-attempt-1--fail-before-fault-injection).
+
+**Historical operator-launched window, 2026-10-20:** user authorized the same scoped campaign from their authenticated host terminal. Receipt `10:38:30Z`; absolute hard stop `11:23:30Z`, cleanup by `11:13:30Z`, no injection at/after `11:08:30Z`. Private approval/metadata/source hashes: `/tmp/opencode/n2-20261020T103830Z-approval/` (0700/0600). Attempt above used `/tmp/opencode/n2-20261020T103830Z-attempt1`. Stop at its unexpected failure; no automatic retry. Company-material and resource-preservation boundaries remain.
+
+**Live window authorized 2026-10-20, admission BLOCKED:** receipt `10:25:44Z`; absolute hard stop `11:10:44Z`, cleanup begins by `11:00:44Z`, no injection at/after `10:55:44Z`. User expressly approved scoped F1/F2, capture/probes, supervised off and exclusive LD01 reuse with no overlapping worker/session. Retained reconciliation passed, but host `sudo -n true` failed and `sudo -n -l` reports interactive authentication required; tcpdump has no file capabilities. **HALTED before deployment/capture/connection/injection; F1/F2 NOT RUN.** Private admission record: `/tmp/opencode/n2-20261020T102544Z-approval/admission-failure.json`; approval/metadata retained there, 0700/0600. No task runtime resources or fresh credentials created; no cleanup required. No automatic retry or host privilege changes. Earlier offline-only statements below are historical, superseded only for this scoped authorization. Retained resources/evidence and company-material prohibition remain in force.
+
+- Owner: OpenCode — N2 offline implementation, 2026-10-20.
+- Branch: `feat/n2-vpn-failure-containment`.
+- Worktree: `/tmp/opencode/termux-vm-n2-vpn-failure-containment`.
+- Base: freshly fetched `origin/main`, `dc1a192619471c74692833e65122d4fa4ebeeec1`, including merged PR #4.
+- Scope: use `bmad-build` for the bounded controlled IPv4 split-lab N2 increment. Approved [N2 spec](implementation-artifacts/spec-n2-vpn-failure-containment.md); policy/campaign: [N2 proposal](linux-docker-trial/n2-proposal.md).
+- Status: **OFFLINE IMPLEMENTATION/REVIEW VERIFIED — LIVE ACCEPTANCE PENDING. P1–P3 accepted and full spec approved-and-continued on 2026-10-20. Live execution is not authorized.** Accepted: fault-latched prefix/all-A classic-DNS containment, explicit off → connect recovery, supervised trial-off design, two-case campaign with scoped capture/counters and maximum 45-minute future window. No Docker/GCP runtime inspection, credential/evidence access, connection, failure injection or resource mutation occurred during planning, implementation or review. Spec remains `in-review` until separately authorized live acceptance; all offline review findings have recorded dispositions.
+- Authorization: offline implementation/tests/review only. Historical connection/publication approvals do not authorize N2 execution. Obtain explicit failure-injection/observation scope approval and a fresh fixed execution window before deployment/testing; no rolling deadline or automatic live retries. Company VPN material is forbidden.
+- Preservation: retain LD01 image, container IDs/configuration/capabilities, homes, networks, labels, project, four disclosed defunct children and all local/VM historical private evidence/material. No restart/recreation, relabeling, package changes or deletion proposed. Prior scoped LD01 reuse is historical coordination; confirm exclusive reuse/no overlap before new runtime work. Reconcile identities and full endpoints before mutation; B8 remains deferred/unverified.
+- Implementation: fault-latched prefix/DNS rules, checked daemon/watch retirement, generation archives, bounded F1/F2 capture/probe/recovery orchestration and fresh-authorization-gated supervised off are implemented in `controlled-vpn/`. Final verification: **74 sandbox tests PASS in 14.873 seconds**, `bash -n` and `git diff --check` pass. Three review layers and corrections are complete. [Offline results and remaining live gates](linux-docker-trial/n2-results.md). No live window, deployment, capture or injection was started.
+- Git: source, tests and N2 artifacts edited only in this worktree. No commit/push/PR/merge/tag authorization for N2.
+- Review corrections: B/E/V and coordinating C1 fixes verified; frozen intent preserved. Tests cover cancellation/publication and gate races, inherited reuse flock, watcher loss, transport observation, strict capture/protocol accounting, controller off/reconnect verdicts, expiry boundaries, archival failures and slow-command supervised cleanup. Review B8 refuted; historical LD01 B8 remains deferred. No live operation/window authorized or started. Exact checks/bounds: [final verification](linux-docker-trial/n2-results.md#final-coordinating-verification-and-c1-correction).
+
+## Previous completed task — controlled VPN trial on GCP
 
 **Fresh execution window completed:** user explicitly selected “Authorize fresh window” after review fixes; receipt `2026-10-20T07:31:09Z`, fixed hard stop `2026-10-20T10:31:09Z` including disconnect/cleanup. Revised-source live attempt 1 and both cycles PASS; cleanup PASS at `07:36:31.392240Z`. Four terminated A child entries remain as explicit residuals. Coordinating verification passed and spec is done; original records remain historical.
 
