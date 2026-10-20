@@ -6,6 +6,58 @@ Published source `2293a9943a570ff627e07856581d3fea2f2df85f` inspected; fresh
 live authority/window. Request read-only reconciliation first; the old zero-zombie
 inputs are historical. Original baseline FAIL / cleanup PASS remain unchanged.
 
+## Follow-up — detached capture cleanup authority, offline only
+
+- Owner OpenCode; branch `fix/detached-cleanup-authority`, isolated worktree
+  `/home/rat/Git/termux-vm-detached-cleanup`, based on
+  `2293a9943a570ff627e07856581d3fea2f2df85f`. User approved the scoped
+  [cleanup-authority spec](implementation-artifacts/spec-detached-cleanup-authority.md).
+- Operator admission, not a live attempt, exposed a privilege boundary: terminal
+  `sudo -n python3` succeeded while the same probe in a detached session failed.
+  No new controller was launched; original baseline FAIL / cleanup PASS remains.
+- The existing privileged bounded capture wrapper now watches a unique durable
+  stop request, validates its own child's exact start identity/command, interrupts
+  and reaps it, and emits a completion receipt. Controller and detached supervisor
+  use that same request without any shutdown-time sudo. Missing/failed completion,
+  expiry, forced retirement or incomplete packet statistics block capture success.
+  A changed child command is not signalled; cleanup reports failure and retains
+  the condition for a human decision rather than broadening the signal target.
+- Added normal-context capture-authority preflight before deployment. Sudo policy,
+  independent supervisor, PID identity, locks, capture scope, accounting, rollback,
+  DNS acceptance and authorization windows remain enforced. No root controller or
+  general privileged service is introduced. Old capture records without the new
+  registration/receipt contract fail closed; they are not an automatic repair path.
+- Initial verification: **107 offline tests PASS in 30.363 seconds, no skips**;
+  Bash syntax and whitespace PASS. Nine new tests use ordinary-user disposable
+  workers, including actual controller SIGKILL followed by detached `watch()` with
+  external commands forbidden. No sudo, Docker/GCP/VPN, real capture, resource
+  change, new execution window, commit or push occurred during implementation.
+- Workflow review and final disposition are recorded in the spec. This branch is
+  offline-only: the existing baseline launcher still pins its published diagnostic
+  branch. Integrate/review the fix and refresh approved source hashes plus read-only
+  admission under a separately authorized UTC window before any new live run.
+  A future operator handoff should test normal capture admission; detached sudo is
+  intentionally unnecessary for this capture stop path.
+- **Independent review pending:** subagent usage limit prevented reviewers from
+  launching. Three self-contained review handoffs accompany the spec. Status is
+  `in-review`, not ready for live use; await all three reviewer results and triage.
+- **Final follow-up supersedes the pending-review status:** retry succeeded; blind,
+  edge-case and verification-gap reviews completed in three isolated worktrees.
+  All introduced findings are corrected and covered. Final verification: **116
+  tests PASS in 39.253 seconds, no skips**, focused review corrections 19 PASS,
+  Bash syntax and staged/working whitespace PASS. Spec is `done` for offline work.
+  Redundant fallback prompts were removed after actual review completion.
+- Review corrections preserve bounded identity-checked finalization for interrupted
+  workers, handle a released gate before exec, recheck before forced escalation,
+  reject unsafe stop markers and premature completion, and cap expiry against
+  clock rollback. Tests bind completion receipts and execute the actual submitted
+  root/tool predicate without real sudo. One verified pre-existing limitation is
+  deferred in `implementation-artifacts/deferred-work.md`: arbitrary SIGTERM or
+  SIGKILL of the privileged wrapper itself can leave its child alive. This is not
+  claimed solved. Normal controller-loss cleanup is exercised successfully.
+  No commit/push or new live attempt occurred; live integration/admission remain
+  separate from this offline fix.
+
 **Latest fix follow-up:** [offline DNS fix](#follow-up--offline-baseline-dns-fixture-fix-2026-10-20)
 diagnosed the missing-AA AAAA mismatch; **98 offline tests PASS**, independent
 review complete. Fix publication authorized; original live FAIL remains.

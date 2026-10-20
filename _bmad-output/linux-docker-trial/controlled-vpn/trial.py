@@ -769,28 +769,68 @@ def stop_forward(record, injection=False):
 
 # Root capture has its own absolute expiry even if both controller and supervisor die.
 CAPTURE = r'''
-import json,os,select,signal,subprocess,sys,time
+import json,os,select,signal,stat,subprocess,sys,time
+stop=sys.argv[2]
+command=sys.argv[3:]
+if os.path.lexists(stop): raise RuntimeError('occupied capture stop request')
+end=float(sys.argv[1]); monotonic_end=time.monotonic()+max(0,end-time.time())
+def remaining(): return min(end-time.time(),monotonic_end-time.monotonic())
 gate="import os,sys; token=sys.stdin.buffer.read(1); sys.exit(1) if token!=b'G' else os.execvp(sys.argv[1],sys.argv[1:])"
-p=subprocess.Popen([sys.executable,'-c',gate,*sys.argv[2:]],stdin=subprocess.PIPE)
+gate_command=[sys.executable,'-c',gate,*command]
+p=subprocess.Popen(gate_command,stdin=subprocess.PIPE)
 identity=open('/proc/%s/stat'%p.pid).read().rsplit(')',1)[1].split()[19]
-print(json.dumps(dict(pid=p.pid,identity=identity)),flush=True)
-try:
-    remaining=float(sys.argv[1])-time.time()
-    if remaining<=0 or not select.select([sys.stdin],[],[],remaining)[0]: sys.exit(1)
-    if os.read(sys.stdin.fileno(),1)!=b'G' or time.time()>=float(sys.argv[1]): sys.exit(1)
-    p.stdin.write(b'G'); p.stdin.close()
-    try: status=p.wait(timeout=max(0,float(sys.argv[1])-time.time()))
-    except subprocess.TimeoutExpired:
-        p.send_signal(signal.SIGINT)
+registration=dict(pid=p.pid,identity=identity,stop_request=stop,command=command,
+    worker_pid=os.getpid(),worker_identity=open('/proc/self/stat').read().rsplit(')',1)[1].split()[19])
+print(json.dumps(registration),flush=True)
+reason='gate'; forced=False; released=False; signalled=False
+def checked_signal(sig):
+    if p.poll() is not None: return None
+    fields=open('/proc/%s/stat'%p.pid).read().rsplit(')',1)[1].split()
+    actual=open('/proc/%s/cmdline'%p.pid,'rb').read().split(b'\0')[:-1]
+    kind='capture' if actual==[os.fsencode(a) for a in command] else 'gate' if actual==[os.fsencode(a) for a in gate_command] else None
+    if fields[0]=='Z': p.wait(timeout=2); return None
+    if fields[19]!=identity or kind is None: raise RuntimeError('capture identity/specification mismatch')
+    p.send_signal(sig)
+    return kind if p.returncode is None else None
+def retire():
+    global forced
+    kind=checked_signal(signal.SIGINT)
+    if kind=='gate':
+        forced=True; checked_signal(signal.SIGKILL); p.wait(timeout=2)
+    elif kind is not None:
         try: p.wait(timeout=5)
-        except subprocess.TimeoutExpired: p.kill(); p.wait()
-        sys.exit(1)
-    sys.exit(status)
+        except subprocess.TimeoutExpired:
+            forced=True
+            checked_signal(signal.SIGKILL)
+            p.wait(timeout=2)
+    return kind
+try:
+    budget=remaining()
+    if budget<=0 or not select.select([sys.stdin],[],[],budget)[0]: sys.exit(1)
+    if os.read(sys.stdin.fileno(),1)!=b'G' or remaining()<=0: sys.exit(1)
+    p.stdin.write(b'G'); p.stdin.close(); released=True
+    while p.poll() is None:
+        if remaining()<=0: reason='expiry'; break
+        if os.path.lexists(stop):
+            info=os.lstat(stop)
+            if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode)!=0o600 or info.st_uid!=os.stat(os.path.dirname(stop)).st_uid:
+                raise RuntimeError('capture stop request must be a private file')
+            reason='requested'; break
+        time.sleep(.05)
+    else: reason='premature'
+    if p.poll() is None:
+        signalled=retire()=='capture'
+    else: reason='premature'
+    sys.exit(0 if reason=='requested' and signalled and not forced and p.returncode==0 else 1)
 finally:
     if p.poll() is None:
-        p.stdin.close()
-        try: p.wait(timeout=1)
-        except subprocess.TimeoutExpired: p.kill(); p.wait()
+        if not released:
+            p.stdin.close()
+            try: p.wait(timeout=1)
+            except subprocess.TimeoutExpired: p.kill(); p.wait(timeout=2)
+        else: retire()
+    print('capture-result: '+json.dumps(dict(**registration,reason=reason,
+        signalled=signalled,forced=forced,returncode=p.returncode)),file=sys.stderr,flush=True)
 '''
 
 
@@ -851,21 +891,28 @@ def stop_capture(state):
 def stop_capture_owned(state):
     record = state["capture"]
     record["stop_requested_at"] = time.time()
-    if process_identity(record["pid"]) == record["identity"]:
-        code = r'''import os,pathlib,signal,sys
-pid,identity,interface,expression=sys.argv[1:]
-p=pathlib.Path('/proc',pid)
-fields=(p/'stat').read_text().rsplit(')',1)[1].split()
-if fields[0]=='Z' or fields[19]!=identity: sys.exit(0)
-command=(p/'cmdline').read_bytes().split(b'\0')
-if not all(x.encode() in command for x in ('tcpdump',interface,expression)): raise RuntimeError('capture identity mismatch')
-os.kill(int(pid),signal.SIGINT)
-'''
-        run("sudo", "-n", "python3", "-c", code, str(record["pid"]), record["identity"], state["veth"], record["filter"])
-        for _ in range(50):
-            if process_identity(record["pid"]) != record["identity"]: break
-            time.sleep(.1)
-        else: raise RuntimeError("capture did not stop")
+    registration = json.loads(Path(record['stdout']).read_text().splitlines()[0])
+    keys = ('pid', 'identity', 'stop_request', 'command', 'worker_pid', 'worker_identity')
+    check(all(record[k] == registration[k] for k in keys), 'capture registration mismatch')
+    check(all(s in record['command'] for s in ('tcpdump', state['veth'], record['filter'])),
+          'capture specification mismatch')
+    stop = Path(record['stop_request'])
+    check(stop == Path(record['stdout']).with_suffix('.stop') and
+          stop.parent == Path(state['private']) and not stop.is_symlink(), 'capture stop path mismatch')
+    check(not stop.exists() or (stop.is_file() and stop.stat().st_mode & 0o777 == 0o600),
+          'capture stop request must be a private file')
+    if not stop.exists(): private_write(stop, 'stop registered capture\n')
+    for _ in range(100):
+        if process_identity(record['worker_pid']) != record['worker_identity']: break
+        time.sleep(.1)
+    else: raise RuntimeError('capture worker did not stop')
+    check(process_identity(record['pid']) != record['identity'], 'capture did not stop')
+    completed = [json.loads(line.removeprefix('capture-result: '))
+                 for line in Path(record['stderr']).read_text().splitlines() if line.startswith('capture-result: ')]
+    check(len(completed) == 1 and all(completed[0].get(k) == record[k] for k in keys) and
+          completed[0].get('reason') == 'requested' and completed[0].get('returncode') == 0 and
+          completed[0].get('signalled') is True and completed[0].get('forced') is False,
+          'capture completion missing or failed')
     # Missing statistics are a failure even when the capture process has vanished.
     proof = capture_proof(state, record.get("intervals", []))
     record["stopped_at"] = time.time()
@@ -1063,6 +1110,8 @@ class Trial:
         reserve()
         authorize(self.state["authorization"], baseline_only=self.baseline_only)
         baseline_dir = diagnostic_inputs(self.state['authorization']) if self.baseline_only else BASELINE
+        run('sudo', '-n', 'python3', '-c',
+            "import os,shutil,sys; sys.exit(0 if os.geteuid()==0 and shutil.which('tcpdump') else 1)")
         branch = 'fix/n2-baseline-diagnostic' if self.baseline_only else 'feat/n2-vpn-failure-containment'
         worktree = ROOT if self.baseline_only else Path('/tmp/opencode/termux-vm-n2-vpn-failure-containment')
         check(run("git", "branch", "--show-current").strip() == branch, "wrong worktree branch")
@@ -1384,10 +1433,11 @@ class Trial:
                       "(dst port 20990 or dst port 20992)))")
         stem = "capture-" + uuid.uuid4().hex
         output, error = self.private / (stem + ".headers"), self.private / (stem + ".stats")
+        stop = self.private / (stem + '.stop')
         with open(output, "x", opener=lambda p, f: os.open(p, f, 0o600)) as stdout, \
                 open(error, "x", opener=lambda p, f: os.open(p, f, 0o600)) as stderr:
             end = dt.datetime.fromisoformat(self.state["deadline"].replace("Z", "+00:00")).timestamp() - 600
-            process = subprocess.Popen(["sudo", "-n", "python3", "-u", "-c", CAPTURE, str(end),
+            process = subprocess.Popen(["sudo", "-n", "python3", "-u", "-c", CAPTURE, str(end), str(stop),
                 "tcpdump", "-i", self.state["veth"], "-Q", "in", "-nn", "-tt", "-q", "-l", "-s", "96", expression],
                 stdin=subprocess.PIPE, stdout=stdout, stderr=stderr)
         self.capture_process = process

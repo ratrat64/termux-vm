@@ -1019,7 +1019,8 @@ class AdmissionAndObservationTests(unittest.TestCase):
                 marker = Path(directory) / 'executed'
                 code = 'import pathlib,signal,sys,time; pathlib.Path(sys.argv[1]).touch(); signal.signal(signal.SIGINT,lambda *_:sys.exit(0)); time.sleep(60)'
                 process = subprocess.Popen([sys.executable, '-u', '-c', trial.CAPTURE, str(time.time() + .5),
-                    sys.executable, '-c', code, str(marker)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    str(Path(directory) / 'capture.stop'), sys.executable, '-c', code, str(marker)],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 try:
                     metadata = json.loads(process.stdout.readline())
                     self.assertIsNotNone(trial.process_identity(metadata['pid']))
@@ -1763,6 +1764,340 @@ class ServerLifecycleTests(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 7)
             rollback = subprocess.run([*command, "rollback"], env=environment, capture_output=True, timeout=3)
             self.assertEqual(rollback.returncode, 0)
+
+
+class DetachedCaptureTests(unittest.TestCase):
+    @contextlib.contextmanager
+    def capture_worker(self, mode='normal', expiry=30, clock_rollback=False):
+        """Real registration/gate/stop worker; substitute ordinary Python for sudo/tcpdump."""
+        with tempfile.TemporaryDirectory() as directory:
+            c = trial.Trial(Path(directory), approval())
+            c.state.update(veth='vethA', a_ip='172.16.0.2', a_bridge='172.16.0.1',
+                           subnet='10.231.0.0/24', deadline=(trial.utc() + dt.timedelta(seconds=600 + expiry)).isoformat())
+            code = r'''
+import os,pathlib,signal,sys,time
+def done(*_):
+    if sys.argv[1]=='exec-on-interrupt': os.execv(sys.executable,[sys.executable,'-c','import time; time.sleep(60)'])
+    print('1 packet captured\n1 packet received by filter\n0 packets dropped by kernel',file=sys.stderr,flush=True)
+    sys.exit(7 if sys.argv[1]=='bad-exit' else 0)
+signal.signal(signal.SIGINT,signal.SIG_IGN if sys.argv[1]=='ignore' else done)
+print('100.000000 IP 172.16.0.2.45000 > 172.16.0.1.20992: tcp 10',flush=True)
+print('tcpdump: listening on vethA',file=sys.stderr,flush=True)
+if sys.argv[1]=='exec-drift': os.execv(sys.executable,[sys.executable,'-c','import time; time.sleep(60)'])
+if sys.argv[1]=='premature':
+    while not pathlib.Path(sys.argv[2]).exists(): time.sleep(.01)
+    done()
+time.sleep(60)
+'''
+            popen = subprocess.Popen
+            def ordinary_worker(command, **kwargs):
+                self.assertEqual(command[:6], ['sudo', '-n', 'python3', '-u', '-c', trial.CAPTURE])
+                worker = trial.CAPTURE
+                if clock_rollback:
+                    worker = '''import sys,time,types
+real=time.time; start=time.monotonic()
+clock=types.ModuleType('time'); clock.__dict__.update(time.__dict__)
+clock.time=lambda: real()-(3600 if time.monotonic()-start>.2 else 0)
+sys.modules['time']=clock
+exec(%r)
+''' % worker
+                return popen([sys.executable, '-u', '-c', worker, command[6], command[7],
+                              sys.executable, '-u', '-c', code, mode, str(c.private / 'premature'), *command[8:]], **kwargs)
+            with patch.object(trial, 'reserve'), patch.object(c, 'check_veth'), \
+                    patch.object(trial.subprocess, 'Popen', side_effect=ordinary_worker):
+                c.start_capture()
+            try:
+                yield c
+            finally:
+                # Only this disposable ordinary-user worker/child, never a retained resource.
+                Path(c.state['capture']['stop_request']).touch(exist_ok=True)
+                try: c.capture_process.wait(timeout=9)
+                except subprocess.TimeoutExpired:
+                    record = c.state['capture']
+                    if trial.process_identity(record['pid']) == record['identity']:
+                        os.kill(record['pid'], signal.SIGKILL)
+                    c.capture_process.kill(); c.capture_process.wait(timeout=3)
+                record = c.state['capture']
+                if trial.process_identity(record['pid']) == record['identity']:
+                    os.kill(record['pid'], signal.SIGKILL)
+
+    def test_real_start_stop_is_registered_private_and_never_reauthenticates(self):
+        with self.capture_worker() as c, patch.object(trial, 'run', side_effect=AssertionError('sudo/external command forbidden')):
+            record = c.state['capture']
+            self.assertFalse(Path(record['stop_request']).exists())
+            result = trial.stop_capture(c.state)
+            self.assertEqual(result['captured'], 1)
+            self.assertEqual(c.capture_process.wait(timeout=2), 0)
+            self.assertIsNone(trial.process_identity(record['pid']))
+            self.assertEqual(Path(record['stop_request']).stat().st_mode & 0o777, 0o600)
+            self.assertEqual(result['source']['command'], record['command'])
+            self.assertEqual(trial.stop_capture(c.state)['dropped'], 0)  # Same completed stop is idempotent.
+
+    def test_other_attempt_stop_does_not_interrupt_this_capture(self):
+        with self.capture_worker() as c:
+            (c.private / 'capture-other.stop').touch()
+            time.sleep(.15)
+            self.assertIsNone(c.capture_process.poll())
+            self.assertIsNotNone(trial.process_identity(c.state['capture']['pid']))
+            self.assertEqual(trial.stop_capture(c.state)['received'], 1)
+
+    def test_wrong_registration_specification_and_path_never_request_or_signal(self):
+        with self.capture_worker() as c:
+            original = copy.deepcopy(c.state)
+            cases = [('pid', 1), ('identity', 'wrong'), ('worker_identity', 'wrong'),
+                     ('command', ['unrelated']), ('stop_request', str(c.private / 'other.stop'))]
+            for field, value in cases:
+                state = copy.deepcopy(original); state['capture'][field] = value
+                with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'registration'):
+                    trial.stop_capture_owned(state)
+            for field in ('veth',):
+                state = copy.deepcopy(original); state[field] = 'wrong'
+                with self.assertRaisesRegex(ValueError, 'specification'): trial.stop_capture_owned(state)
+            self.assertFalse(Path(original['capture']['stop_request']).exists())
+            self.assertIsNone(c.capture_process.poll())
+
+    def test_worker_refuses_to_signal_child_whose_command_changed(self):
+        with self.capture_worker('exec-drift') as c:
+            with self.assertRaisesRegex(ValueError, 'capture did not stop'):
+                trial.stop_capture(c.state)
+            self.assertNotEqual(c.capture_process.wait(timeout=2), 0)
+            self.assertIsNotNone(trial.process_identity(c.state['capture']['pid']))
+            self.assertIn('identity/specification mismatch', Path(c.state['capture']['stderr']).read_text())
+
+    def test_wrapper_interrupt_retires_matching_child_without_claiming_success(self):
+        with self.capture_worker() as c:
+            os.kill(c.state['capture']['worker_pid'], signal.SIGINT)
+            self.assertNotEqual(c.capture_process.wait(timeout=8), 0)
+            self.assertIsNone(trial.process_identity(c.state['capture']['pid']))
+            with self.assertRaisesRegex(ValueError, 'completion'): trial.stop_capture(c.state)
+
+    def test_escalation_rechecks_command_after_interrupt_handler_exec(self):
+        with self.capture_worker('exec-on-interrupt') as c:
+            with self.assertRaisesRegex(ValueError, 'capture did not stop'): trial.stop_capture(c.state)
+            self.assertIsNotNone(trial.process_identity(c.state['capture']['pid']))
+            self.assertNotEqual(c.capture_process.wait(timeout=2), 0)
+            self.assertIn('identity/specification mismatch', Path(c.state['capture']['stderr']).read_text())
+
+    def test_clock_rollback_cannot_extend_initial_expiry_budget(self):
+        with self.capture_worker(expiry=.5, clock_rollback=True) as c:
+            self.assertNotEqual(c.capture_process.wait(timeout=3), 0)
+            self.assertIsNone(trial.process_identity(c.state['capture']['pid']))
+            with self.assertRaisesRegex(ValueError, 'completion'): trial.stop_capture(c.state)
+
+    def test_worker_rejects_unsafe_marker_instead_of_certifying_requested_stop(self):
+        for kind in ('symlink', 'directory', 'public'):
+            with self.subTest(kind=kind), self.capture_worker() as c:
+                marker = Path(c.state['capture']['stop_request'])
+                if kind == 'symlink': marker.symlink_to(c.private / 'absent')
+                elif kind == 'directory': marker.mkdir()
+                else: marker.write_text('unsafe'); marker.chmod(0o644)
+                try:
+                    self.assertNotEqual(c.capture_process.wait(timeout=8), 0)
+                    self.assertIsNone(trial.process_identity(c.state['capture']['pid']))
+                    self.assertIn('must be a private file', Path(c.state['capture']['stderr']).read_text())
+                finally:
+                    if marker.is_dir(): marker.rmdir()
+                    else: marker.unlink()
+
+    def test_completed_stop_rejects_unsafe_endpoint_at_the_path_guard(self):
+        with self.capture_worker() as c:
+            trial.stop_capture(c.state); c.capture_process.wait(timeout=2)
+            marker = Path(c.state['capture']['stop_request'])
+            for kind in ('symlink', 'directory', 'public'):
+                marker.unlink()
+                if kind == 'symlink': marker.symlink_to(c.private / 'absent')
+                elif kind == 'directory': marker.mkdir()
+                else: marker.write_text('unsafe'); marker.chmod(0o644)
+                with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, 'stop path|private file'):
+                    trial.stop_capture(c.state)
+                if marker.is_dir(): marker.rmdir()
+                else: marker.unlink()
+                trial.private_write(marker, 'restored')
+            state = copy.deepcopy(c.state)
+            state['capture']['stop_request'] = str(c.private / 'wrong.stop')
+            headers = Path(state['capture']['stdout']); lines = headers.read_text().splitlines()
+            registration = json.loads(lines[0]); registration['stop_request'] = state['capture']['stop_request']
+            lines[0] = json.dumps(registration); headers.write_text('\n'.join(lines) + '\n')
+            with self.assertRaisesRegex(ValueError, 'stop path mismatch'): trial.stop_capture_owned(state)
+
+    def test_completion_receipt_is_bound_to_every_registered_field(self):
+        with self.capture_worker() as c:
+            trial.stop_capture(c.state); c.capture_process.wait(timeout=2)
+            path = Path(c.state['capture']['stderr']); text = path.read_text()
+            prefix, receipt_text = text.rsplit('capture-result: ', 1)
+            receipt = json.loads(receipt_text)
+            for key in ('pid', 'identity', 'stop_request', 'command', 'worker_pid', 'worker_identity', 'signalled'):
+                wrong = dict(receipt); wrong[key] = False if key == 'signalled' else ['wrong'] if key == 'command' else 'wrong'
+                path.write_text(prefix + 'capture-result: ' + json.dumps(wrong) + '\n')
+                with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'completion'):
+                    trial.stop_capture(c.state)
+            path.write_text(text)
+
+    def test_gate_not_yet_execed_is_retired_on_stop_or_expiry(self):
+        for request in (False, True):
+            with self.subTest(request=request), tempfile.TemporaryDirectory() as directory:
+                private = Path(directory); stop = private / 'capture.stop'; marker = private / 'executed'
+                code = 'import pathlib,sys,time; pathlib.Path(sys.argv[1]).touch(); time.sleep(60)'
+                process = subprocess.Popen([sys.executable, '-u', '-c', trial.CAPTURE, str(time.time()+.5), str(stop),
+                                            sys.executable, '-c', code, str(marker)],
+                                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                registration = json.loads(process.stdout.readline())
+                try:
+                    os.kill(registration['pid'], signal.SIGSTOP)
+                    if request: trial.private_write(stop, 'stop')
+                    output, error = process.communicate(b'G', timeout=4)
+                    self.assertNotEqual(process.returncode, 0, error)
+                    self.assertFalse(marker.exists())
+                    self.assertIsNone(trial.process_identity(registration['pid']))
+                finally:
+                    if trial.process_identity(registration['pid']) == registration['identity']:
+                        os.kill(registration['pid'], signal.SIGKILL)
+                    if process.poll() is None: process.kill()
+                    process.communicate(timeout=3)
+
+    def test_exit_between_request_poll_and_signal_is_premature_not_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stop = Path(directory) / 'capture.stop'; trial.private_write(stop, 'stop')
+            p = Mock(pid=os.getpid(), returncode=None)
+            def poll():
+                value = next(values, 0)
+                p.returncode = value
+                return value
+            values = iter((None, 0))
+            p.poll.side_effect = poll
+            output, error = io.StringIO(), io.StringIO()
+            with patch.object(sys, 'argv', ['capture', str(time.time()+30), str(stop), 'synthetic']), \
+                    patch.object(trial.subprocess, 'Popen', return_value=p), \
+                    patch('select.select', return_value=([sys.stdin], [], [])), \
+                    patch.object(os, 'read', return_value=b'G'), \
+                    patch.object(os.path, 'lexists', side_effect=(False, True)), \
+                    contextlib.redirect_stdout(output), contextlib.redirect_stderr(error):
+                with self.assertRaises(SystemExit) as result: exec(trial.CAPTURE, {})
+            self.assertEqual(result.exception.code, 1)
+            p.send_signal.assert_not_called()
+            completion = json.loads(error.getvalue().split('capture-result: ', 1)[1])
+            self.assertEqual(completion['reason'], 'premature')
+            self.assertFalse(completion['signalled'])
+
+    def test_premature_exit_bad_exit_missing_completion_and_expiry_fail(self):
+        for mode, expiry in (('premature', 30), ('bad-exit', 30), ('normal', .4)):
+            with self.subTest(mode=mode, expiry=expiry), self.capture_worker(mode, expiry) as c:
+                if mode == 'premature': (c.private / 'premature').touch()
+                if mode == 'premature' or expiry < 1: c.capture_process.wait(timeout=3)
+                with self.assertRaisesRegex(ValueError, 'completion'):
+                    trial.stop_capture(c.state)
+                self.assertIsNone(trial.process_identity(c.state['capture']['pid']))
+        with self.capture_worker() as c:
+            trial.stop_capture(c.state); c.capture_process.wait(timeout=2)
+            path = Path(c.state['capture']['stderr'])
+            path.write_text('\n'.join(line for line in path.read_text().splitlines() if not line.startswith('capture-result: ')) + '\n')
+            with self.assertRaisesRegex(ValueError, 'completion'): trial.stop_capture(c.state)
+
+    def test_ignored_interrupt_is_bounded_and_never_passes(self):
+        with self.capture_worker('ignore') as c:
+            start = time.monotonic()
+            with self.assertRaisesRegex(ValueError, 'completion'): trial.stop_capture(c.state)
+            self.assertLess(time.monotonic() - start, 9)
+            self.assertNotEqual(c.capture_process.wait(timeout=2), 0)
+            self.assertIsNone(trial.process_identity(c.state['capture']['pid']))
+
+    def test_detached_real_supervisor_reloads_after_controller_loss_without_sudo(self):
+        with self.capture_worker() as c:
+            # Model an already-dead controller using a real disposable process identity.
+            dead = subprocess.Popen([sys.executable, '-c', 'pass'])
+            identity = trial.process_identity(dead.pid)
+            dead.wait(timeout=3)
+            c.state.update(controller_pid=dead.pid, controller_identity=identity)
+            trial.save(c.state)
+            script = '''
+import pathlib,sys
+import trial
+def denied(*args,**kwargs): raise AssertionError('sudo/external command unavailable in detached supervisor')
+trial.run=denied
+trial.watch(pathlib.Path(sys.argv[1]))
+'''
+            env = dict(os.environ, PYTHONPATH=str(trial.HERE), PYTHONDONTWRITEBYTECODE='1')
+            supervisor = subprocess.run([sys.executable, '-c', script, str(c.private / 'state.json')],
+                                        env=env, start_new_session=True, capture_output=True, text=True, timeout=15)
+            self.assertEqual(supervisor.returncode, 0, supervisor.stderr)
+            self.assertEqual(json.loads((c.private / 'cleaned.json').read_text())['status'], 'PASS')
+            result = json.loads((c.private / 'supervisor-result.json').read_text())
+            self.assertEqual(result['campaign_status'], 'FAIL')  # Controller loss is still a campaign failure.
+            self.assertEqual(result['cleanup_status'], 'PASS')
+            self.assertEqual(result['cleanup_errors'], [])
+            self.assertEqual(c.capture_process.wait(timeout=2), 0)
+            self.assertIsNone(trial.process_identity(c.state['capture']['pid']))
+
+    def test_capture_survives_actual_controller_kill_then_detached_watch_cleans(self):
+        script = '''
+import signal
+from test_trial import DetachedCaptureTests
+with DetachedCaptureTests().capture_worker(expiry=60) as c:
+    print(c.private,flush=True)
+    signal.pause()
+'''
+        env = dict(os.environ, PYTHONPATH=str(trial.HERE), PYTHONDONTWRITEBYTECODE='1')
+        controller = subprocess.Popen([sys.executable, '-u', '-c', script], env=env,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        private = None; state = None
+        try:
+            private = Path(controller.stdout.readline().strip())
+            state = json.loads((private / 'state.json').read_text())
+            controller.kill(); controller.communicate(timeout=3)
+            self.assertIsNotNone(trial.process_identity(state['capture']['pid']))
+            supervisor_code = '''
+import pathlib,sys,trial
+def denied(*a,**kw): raise AssertionError('detached sudo forbidden')
+trial.run=denied
+trial.watch(pathlib.Path(sys.argv[1]))
+'''
+            result = subprocess.run([sys.executable, '-c', supervisor_code, str(private / 'state.json')],
+                                    env=env, start_new_session=True, capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads((private / 'supervisor-result.json').read_text())['cleanup_status'], 'PASS')
+            self.assertEqual(json.loads((private / 'cleaned.json').read_text())['errors'], [])
+            self.assertIsNone(trial.process_identity(state['capture']['pid']))
+        finally:
+            if controller.poll() is None: controller.kill()
+            controller.communicate(timeout=3)
+            if state:
+                record = state['capture']
+                Path(record['stop_request']).touch(exist_ok=True)
+                for _ in range(30):
+                    if trial.process_identity(record['worker_pid']) != record['worker_identity']: break
+                    time.sleep(.1)
+                for key, identity_key in (('pid', 'identity'), ('worker_pid', 'worker_identity')):
+                    if trial.process_identity(record[key]) == record[identity_key]: os.kill(record[key], signal.SIGKILL)
+            if private and private.is_dir():
+                import shutil
+                shutil.rmtree(private)
+
+    def test_sudo_admission_failure_precedes_any_deployment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            c = trial.Trial(Path(directory), approval())
+            with patch.object(trial, 'reserve'), patch.object(trial, 'run', side_effect=RuntimeError('sudo unavailable')) as run:
+                with self.assertRaisesRegex(RuntimeError, 'sudo unavailable'): c.preflight()
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.args[:4], ('sudo', '-n', 'python3', '-c'))
+            self.assertNotIn('deployed', c.state)
+
+    def test_submitted_admission_predicate_rejects_nonroot_and_missing_tool(self):
+        for uid, tool in ((1001, '/tool/tcpdump'), (0, None), (0, '/tool/tcpdump')):
+            with self.subTest(uid=uid, tool=tool), tempfile.TemporaryDirectory() as directory:
+                c = trial.Trial(Path(directory), approval()); results = []
+                def run(*args, **kwargs):
+                    if args[0] != 'sudo': return 'wrong-branch'
+                    harness = 'import os,shutil,sys; os.geteuid=lambda: int(sys.argv[1]); shutil.which=lambda _: sys.argv[2] or None; exec(sys.argv[3])'
+                    result = subprocess.run([sys.executable, '-c', harness, str(uid), tool or '', args[-1]], capture_output=True)
+                    results.append(result.returncode)
+                    if result.returncode: raise RuntimeError('predicate refused')
+                    return ''
+                with patch.object(trial, 'reserve'), patch.object(trial, 'run', side_effect=run):
+                    if uid == 0 and tool:
+                        with self.assertRaisesRegex(ValueError, 'wrong worktree branch'): c.preflight()
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'predicate refused'): c.preflight()
+                self.assertEqual(results, [0 if uid == 0 and tool else 1])
 
 
 class LiveFailureRegressionTests(unittest.TestCase):
