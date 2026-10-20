@@ -1,0 +1,226 @@
+#!/bin/bash
+# Run as root from a fresh private upload directory. No public listeners or NAT.
+set -euo pipefail
+umask 077
+task=${1:?task}; subnet=${2:?subnet}; deadline=${3:?UTC deadline}
+bridge=${4:?A bridge}; forward_port=${5:?forward port}
+receipt=${6:?ownership receipt}
+root=/var/lib/ld01-cvpn-$task
+prefix=ld01-$task
+source_dir=$(dirname "$(readlink -f "$0")")
+mode=${7:-setup}
+[[ $deadline == 2026-10-20T10:31:09Z ]] || { printf 'Unapproved deadline\n' >&2; exit 1; }
+[[ $task =~ ^cvpn[0-9a-f]{12}$ && $receipt =~ ^[0-9a-f]{32}$ ]] || exit 1
+end_epoch=$(date -u -d "$deadline" +%s)
+
+cleanup_reserve() {
+    remaining=$(( end_epoch - $(date -u +%s) - 180 ))
+    (( remaining > 0 )) && [[ ! -e $source_dir/cancelled ]]
+}
+
+rollback_units() {
+    local failed=0 service unit
+    if [[ -e $root ]]; then
+        [[ $(< "$root/receipt") == "$receipt" ]] || return 1
+    fi
+    for service in http dns heartbeat vpn; do
+        unit=$prefix-$service.service
+        if [[ -f /etc/systemd/system/$unit ]]; then systemctl stop "$unit" || failed=1; fi
+        if systemctl is-active --quiet "$unit"; then failed=1; fi
+    done
+    for service in http dns heartbeat vpn; do
+        rm -f "/etc/systemd/system/$prefix-$service.service"
+    done
+    systemctl daemon-reload || failed=1
+    return "$failed"
+}
+
+if [[ $mode == rollback ]]; then
+    # Publish cancellation before waiting: a queued/late setup cannot start later.
+    touch "$source_dir/cancelled"
+    exec 9>"$source_dir/lifecycle.lock"
+    flock -w 330 9 || exit 1
+    # The setup worker (and its timeout-controlled children) have now terminated.
+    rollback_units
+    exit $?
+elif [[ $mode == setup ]]; then
+    cleanup_reserve
+    budget=$remaining
+    (( budget <= 300 )) || budget=300
+    # Bound the whole worker, including lock acquisition, packages and services.
+    exec timeout --signal=TERM --kill-after=5s "${budget}s" bash "$0" "${@:1:6}" worker
+elif [[ $mode != worker ]]; then
+    exit 1
+fi
+
+exec 9>"$source_dir/lifecycle.lock"
+flock -w 300 9
+cleanup_reserve
+
+# All collision/deadline checks precede packages, directories, keys and units.
+python3 - "$task" "$subnet" "$deadline" "$bridge" "$forward_port" "$root" "$receipt" <<'PY'
+import datetime, ipaddress, json, pathlib, re, socket, subprocess, sys
+def check(value, message):
+    if not value: raise ValueError(message)
+task, subnet, deadline, bridge, port, root, receipt = sys.argv[1:]
+check(re.fullmatch(r'cvpn[0-9a-f]{12}', task), 'invalid task identity')
+check(re.fullmatch(r'[0-9a-f]{32}', receipt), 'invalid ownership receipt')
+end = datetime.datetime.fromisoformat(deadline.replace('Z', '+00:00'))
+check(datetime.datetime.now(datetime.timezone.utc) < end - datetime.timedelta(minutes=10), 'deadline/cleanup reserve')
+check(end <= datetime.datetime.fromisoformat('2026-10-20T10:31:09+00:00'), 'deadline exceeds approval')
+net = ipaddress.ip_network(subnet)
+check(net.version == 4 and net.prefixlen == 24 and net.is_private, 'invalid subnet')
+check(ipaddress.ip_address(bridge).version == 4 and 1024 < int(port) < 65536, 'invalid forward')
+check(not pathlib.Path(root).exists(), 'occupied task path')
+check(not list(pathlib.Path('/etc/systemd/system').glob('ld01-' + task + '*')), 'occupied units')
+check(not pathlib.Path('/sys/class/net/ld01srv').exists(), 'occupied tunnel')
+for route in json.loads(subprocess.check_output(['ip', '-4', '-j', 'route', 'show', 'table', 'all'])):
+    if route.get('dst') not in (None, 'default'):
+        check(not net.overlaps(ipaddress.ip_network(route['dst'], strict=False)), 'subnet collision')
+for port in (11940, 19090):
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', port))
+PY
+
+mkdir -m 700 "$root"
+printf '%s\n' "$receipt" > "$root/receipt"
+cp "$source_dir/fixtures.py" "$root/fixtures.py"
+dpkg-query -W -f='${binary:Package}\t${Version}\n' > "$root/packages-before.tsv"
+
+# Rollback retains the fresh PKI and audit files, but removes all task units.
+cat > "$root/rollback.sh" <<EOF
+#!/bin/bash
+exec bash "$source_dir/setup-server.sh" "$task" "$subnet" "$deadline" "$bridge" "$forward_port" "$receipt" rollback
+EOF
+chmod 700 "$root/rollback.sh"
+trap 'status=$?; if (( status != 0 )); then touch "$source_dir/cancelled"; rollback_units > "$root/rollback-failure.log" 2>&1 || true; fi' EXIT
+trap 'exit 143' TERM
+
+export DEBIAN_FRONTEND=noninteractive
+# dnsmasq-base contains the binary, not the system-wide dnsmasq daemon.
+apt-get update > "$root/packages.log" 2>&1
+apt-get install -y --no-install-recommends openvpn dnsmasq-base openssl python3 >> "$root/packages.log" 2>&1
+dpkg-query -W -f='${binary:Package}\t${Version}\n' > "$root/packages-after.tsv"
+cd "$root"
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 2 -subj /CN=LD01-Controlled-Lab-CA \
+    -keyout ca.key -out ca.crt > pki.log 2>&1
+for role in server client; do
+    name=lab.ld01.test; usage=serverAuth
+    if [[ $role == client ]]; then name=ld01-lab-client; usage=clientAuth; fi
+    openssl req -new -newkey rsa:2048 -nodes -sha256 -subj "/CN=$name" \
+        -keyout "$role.key" -out "$role.csr" >> pki.log 2>&1
+    printf 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=%s\n' "$usage" > "$role.ext"
+    openssl x509 -req -in "$role.csr" -CA ca.crt -CAkey ca.key -CAcreateserial \
+        -days 2 -sha256 -extfile "$role.ext" -out "$role.crt" >> pki.log 2>&1
+done
+openvpn --genkey secret tls-crypt.key
+network=${subnet%/*}; server=${network%.*}.1
+cat > server.conf <<EOF
+local 127.0.0.1
+port 11940
+proto tcp-server
+dev ld01srv
+dev-type tun
+topology subnet
+server $network 255.255.255.0
+ca $root/ca.crt
+cert $root/server.crt
+key $root/server.key
+dh none
+tls-crypt $root/tls-crypt.key
+tls-version-min 1.2
+remote-cert-tls client
+verify-x509-name ld01-lab-client name
+auth SHA256
+data-ciphers AES-256-GCM:AES-128-GCM
+keepalive 5 20
+max-clients 1
+verb 3
+log $root/server.log
+EOF
+cat > client.ovpn <<EOF
+# Requires this trial controller's IAP/SSH forward; no public VPN endpoint.
+client
+proto tcp-client
+remote $bridge $forward_port
+dev ld01tun
+dev-type tun
+nobind
+remote-cert-tls server
+verify-x509-name lab.ld01.test name
+tls-version-min 1.2
+auth SHA256
+data-ciphers AES-256-GCM:AES-128-GCM
+route-nopull
+auth-nocache
+connect-retry-max 1
+connect-timeout 10
+resolv-retry 0
+tls-exit
+reneg-sec 0
+verb 3
+EOF
+for entry in 'ca ca.crt' 'cert client.crt' 'key client.key' 'tls-crypt tls-crypt.key'; do
+    read -r tag file <<< "$entry"
+    printf '<%s>\n' "$tag" >> client.ovpn
+    cat "$file" >> client.ovpn
+    printf '</%s>\n' "$tag" >> client.ovpn
+done
+cat > dns.conf <<EOF
+listen-address=$server
+bind-interfaces
+port=53
+no-hosts
+local=/ld01.test/
+host-record=service.ld01.test,$server
+cache-size=50
+user=root
+group=root
+EOF
+for service in vpn http dns heartbeat; do
+    cleanup_reserve
+    case $service in
+        vpn) command="/usr/sbin/openvpn --config $root/server.conf"; after=network.target ;;
+        http) command="/usr/bin/python3 $root/fixtures.py http --host $server --port 8080 --fixture $task"; after="$prefix-vpn.service" ;;
+        dns) command="/usr/sbin/dnsmasq --keep-in-foreground --conf-file=$root/dns.conf"; after="$prefix-vpn.service" ;;
+        heartbeat) command="/usr/bin/python3 $root/fixtures.py heartbeat --host 127.0.0.1 --port 19090"; after=network.target ;;
+    esac
+    cat > "/etc/systemd/system/$prefix-$service.service" <<EOF
+[Unit]
+Description=LD01 controlled VPN $task $service
+After=$after
+[Service]
+Type=simple
+ExecStart=$command
+Restart=no
+RuntimeMaxSec=$remaining
+TimeoutStopSec=15
+TimeoutStartSec=15
+UMask=0077
+StandardOutput=append:$root/$service-unit.log
+StandardError=append:$root/$service-unit.log
+EOF
+    chmod 600 "/etc/systemd/system/$prefix-$service.service"
+done
+systemctl daemon-reload
+cleanup_reserve
+systemctl start "$prefix-vpn.service"
+for attempt in {1..40}; do
+    if ip -4 addr show dev ld01srv 2>/dev/null | grep -q "$server/24"; then break; fi
+    sleep 0.25
+done
+ip -4 addr show dev ld01srv > tunnel.txt
+for service in http dns heartbeat; do
+    cleanup_reserve
+    systemctl start "$prefix-$service.service"
+done
+for service in vpn http dns heartbeat; do systemctl is-active --quiet "$prefix-$service.service"; done
+python3 - "$task" "$subnet" "$server" "$deadline" <<'PY' > server.json
+import json, subprocess, sys
+task, subnet, server, deadline = sys.argv[1:]
+print(json.dumps(dict(task=task, subnet=subnet, server=server, deadline=deadline,
+    openvpn=subprocess.check_output(['openvpn', '--version'], text=True).splitlines()[0],
+    dnsmasq=subprocess.check_output(['dnsmasq', '--version'], text=True).splitlines()[0])))
+PY
+chmod 600 "$root"/*
+chmod 700 "$root/rollback.sh"
