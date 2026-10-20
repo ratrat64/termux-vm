@@ -1,6 +1,12 @@
 # N2 — controlled VPN failure containment and recovery
 
-**Latest follow-up:** [offline DNS fix](#follow-up--offline-baseline-dns-fixture-fix-2026-10-20)
+**Next validation preparation:** [offline readiness and three separate gates](linux-docker-trial/baseline-dns-validation-readiness.md).
+Published source `2293a9943a570ff627e07856581d3fea2f2df85f` inspected; fresh
+**98 offline tests PASS**. No runtime inspection, new reference acceptance or
+live authority/window. Request read-only reconciliation first; the old zero-zombie
+inputs are historical. Original baseline FAIL / cleanup PASS remain unchanged.
+
+**Latest fix follow-up:** [offline DNS fix](#follow-up--offline-baseline-dns-fixture-fix-2026-10-20)
 diagnosed the missing-AA AAAA mismatch; **98 offline tests PASS**, independent
 review complete. Fix publication authorized; original live FAIL remains.
 

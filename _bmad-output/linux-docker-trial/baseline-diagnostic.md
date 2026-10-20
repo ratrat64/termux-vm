@@ -216,3 +216,20 @@ There is no new live verdict. A later live attempt remains separately authorized
 After offline completion, the user separately authorized committing/pushing this
 verified fix on the existing task branch. The no-commit/push statement above
 describes offline implementation; publication does not authorize a live retry.
+
+## Next repaired-fixture validation — offline preparation, 2026-10-20
+
+Published source `2293a9943a570ff627e07856581d3fea2f2df85f` and saved attempt
+evidence inspected offline. Fresh **98 tests PASS in 27.544 seconds**, no skips;
+Bash syntax, CLI help and saved-input/evidence consistency checks PASS. No new
+runtime evidence, reference adoption, live approval/window or retry.
+
+[Readiness and exact gates](baseline-dns-validation-readiness.md) separate
+read-only Docker/host/GCP reconciliation, explicit acceptance of the changed
+reference (including exact current zombie start identities/journal hashes), and
+fresh single-attempt live authorization. The old zero-zombie inputs must not be
+reused unchanged; the historical inspector omits the failed attempt's VM task
+and the historical input builder requires zero zombies. Reuse the existing
+controller unchanged after the gates, with durable new private evidence, scoped
+capture, exclusive reuse and supervised abort/off. **Historical baseline FAIL /
+cleanup PASS are preserved; repaired-fixture live validation remains NOT RUN.**
