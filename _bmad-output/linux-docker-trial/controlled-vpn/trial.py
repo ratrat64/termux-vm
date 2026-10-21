@@ -769,7 +769,7 @@ def stop_forward(record, injection=False):
 
 # Root capture has its own absolute expiry even if both controller and supervisor die.
 CAPTURE = r'''
-import json,os,select,signal,stat,subprocess,sys,time
+import json,os,re,select,signal,stat,subprocess,sys,time
 stop=sys.argv[2]
 command=sys.argv[3:]
 if os.path.lexists(stop): raise RuntimeError('occupied capture stop request')
@@ -782,7 +782,7 @@ identity=open('/proc/%s/stat'%p.pid).read().rsplit(')',1)[1].split()[19]
 registration=dict(pid=p.pid,identity=identity,stop_request=stop,command=command,
     worker_pid=os.getpid(),worker_identity=open('/proc/self/stat').read().rsplit(')',1)[1].split()[19])
 print(json.dumps(registration),flush=True)
-reason='gate'; forced=False; released=False; signalled=False
+reason='gate'; forced=False; released=False; signalled=False; convergence='not-requested'
 def checked_signal(sig):
     if p.poll() is not None: return None
     fields=open('/proc/%s/stat'%p.pid).read().rsplit(')',1)[1].split()
@@ -790,8 +790,43 @@ def checked_signal(sig):
     kind='capture' if actual==[os.fsencode(a) for a in command] else 'gate' if actual==[os.fsencode(a) for a in gate_command] else None
     if fields[0]=='Z': p.wait(timeout=2); return None
     if fields[19]!=identity or kind is None: raise RuntimeError('capture identity/specification mismatch')
+    if sig==signal.SIGUSR1 and kind!='capture': return None
+    if sig==signal.SIGINT and kind=='capture':
+        print('capture-terminal:',file=sys.stderr,flush=True)
     p.send_signal(sig)
     return kind if p.returncode is None else None
+def converge():
+    # Read only our already-owned stderr file; positional reads do not move its write offset.
+    fd=os.open('/proc/self/fd/2',os.O_RDONLY|os.O_CLOEXEC)
+    try:
+        actual,expected=os.fstat(fd),os.fstat(2)
+        if not stat.S_ISREG(actual.st_mode) or (actual.st_dev,actual.st_ino)!=(expected.st_dev,expected.st_ino):
+            raise RuntimeError('capture statistics descriptor mismatch')
+        if b'listening on ' not in os.pread(fd,65536,0): return False
+        until=time.monotonic()+max(0,min(2,remaining()-7))
+        previous=None; offset=os.fstat(fd).st_size
+        while time.monotonic()<until and remaining()>7:
+            if os.fstat(fd).st_size!=offset: return False
+            if checked_signal(signal.SIGUSR1)!='capture': return False
+            while time.monotonic()<until and remaining()>7 and p.poll() is None:
+                data=os.pread(fd,65537,offset)
+                if len(data)>65536: return False
+                if b'\n' in data:
+                    sample=re.fullmatch(rb'tcpdump: (\d+) packets? captured, (\d+) packets? received by filter, (\d+) packets? dropped by kernel(?:, (\d+) packets? dropped by interface)?\n',data)
+                    if sample is None: return False
+                    break
+                time.sleep(.01)
+            else: return False  # Never issue another request with an unanswered sample pending.
+            offset+=len(data)
+            if os.fstat(fd).st_size!=offset: return False
+            counts=tuple(int(n or b'0') for n in sample.groups())
+            if counts[2:]!=(0,0): return False
+            good=counts[0]==counts[1]>0
+            if good and previous==counts: return remaining()>7
+            previous=counts if good else None
+            time.sleep(min(.05,max(0,until-time.monotonic())))
+        return False
+    finally: os.close(fd)
 def retire():
     global forced
     kind=checked_signal(signal.SIGINT)
@@ -819,9 +854,11 @@ try:
         time.sleep(.05)
     else: reason='premature'
     if p.poll() is None:
+        if reason=='requested': convergence='complete' if converge() else 'timeout'
+        if remaining()<=0: reason='expiry'
         signalled=retire()=='capture'
     else: reason='premature'
-    sys.exit(0 if reason=='requested' and signalled and not forced and p.returncode==0 else 1)
+    sys.exit(0 if reason=='requested' and convergence=='complete' and signalled and not forced and p.returncode==0 else 1)
 finally:
     if p.poll() is None:
         if not released:
@@ -830,7 +867,7 @@ finally:
             except subprocess.TimeoutExpired: p.kill(); p.wait(timeout=2)
         else: retire()
     print('capture-result: '+json.dumps(dict(**registration,reason=reason,
-        signalled=signalled,forced=forced,returncode=p.returncode)),file=sys.stderr,flush=True)
+        signalled=signalled,forced=forced,returncode=p.returncode,convergence=convergence)),file=sys.stderr,flush=True)
 '''
 
 
@@ -855,10 +892,17 @@ def check_counter_growth(before, after):
           sum(new[1:]) > sum(old[1:]), "no prefix/DNS rejection counter growth")
 
 
-def capture_proof(state, intervals):
+def capture_proof(state, intervals, terminal=False):
     record = state["capture"]
     text = Path(record["stderr"]).read_text()
     check("listening on " + state["veth"] in text, "capture readiness missing")
+    if terminal or 'capture-terminal:\n' in text:
+        check(text.count('capture-terminal:\n') == 1 and text.count('capture-result: ') == 1,
+              'capture terminal statistics boundary missing')
+        text = text.split('capture-terminal:\n', 1)[1].split('capture-result: ', 1)[0]
+        check(re.fullmatch(r'\d+ packets? captured\n\d+ packets? received by filter\n'
+                           r'\d+ packets? dropped by kernel\n(?:\d+ packets? dropped by interface\n)?', text),
+              'capture terminal statistics missing or malformed')
     counts = [re.search(r"(?m)^(\d+) packets? " + label, text)
               for label in ("captured", "received by filter", "dropped by kernel")]
     check(all(counts), "capture drop accounting missing")
@@ -910,11 +954,12 @@ def stop_capture_owned(state):
     completed = [json.loads(line.removeprefix('capture-result: '))
                  for line in Path(record['stderr']).read_text().splitlines() if line.startswith('capture-result: ')]
     check(len(completed) == 1 and all(completed[0].get(k) == record[k] for k in keys) and
-          completed[0].get('reason') == 'requested' and completed[0].get('returncode') == 0 and
-          completed[0].get('signalled') is True and completed[0].get('forced') is False,
+           completed[0].get('reason') == 'requested' and completed[0].get('returncode') == 0 and
+          completed[0].get('signalled') is True and completed[0].get('forced') is False and
+          completed[0].get('convergence') == 'complete',
           'capture completion missing or failed')
     # Missing statistics are a failure even when the capture process has vanished.
-    proof = capture_proof(state, record.get("intervals", []))
+    proof = capture_proof(state, record.get("intervals", []), terminal=True)
     record["stopped_at"] = time.time()
     save(state)
     return {**proof, "source": dict(record)}
@@ -1438,7 +1483,7 @@ class Trial:
                 open(error, "x", opener=lambda p, f: os.open(p, f, 0o600)) as stderr:
             end = dt.datetime.fromisoformat(self.state["deadline"].replace("Z", "+00:00")).timestamp() - 600
             process = subprocess.Popen(["sudo", "-n", "python3", "-u", "-c", CAPTURE, str(end), str(stop),
-                "tcpdump", "-i", self.state["veth"], "-Q", "in", "-nn", "-tt", "-q", "-l", "-s", "96", expression],
+                "tcpdump", "--immediate-mode", "-i", self.state["veth"], "-Q", "in", "-nn", "-tt", "-q", "-l", "-s", "96", expression],
                 stdin=subprocess.PIPE, stdout=stdout, stderr=stderr)
         self.capture_process = process
         try:

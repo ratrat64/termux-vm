@@ -1,5 +1,92 @@
 # N2 — controlled VPN failure containment and recovery
 
+## Latest — offline capture-accounting fix verified; publication approved
+
+- Owner OpenCode; existing branch `fix/n2-baseline-diagnostic` and durable worktree
+  `/home/rat/Git/termux-vm-n2-baseline-diagnostic`. User accepted the qualified
+  shutdown-tail diagnosis, approved offline implementation and confirmed preserving
+  this worktree's existing owner/result updates and untracked files.
+- The shared capture worker now requests immediate delivery and bounded fresh
+  SIGUSR1 accounting convergence before identity-checked SIGINT. Progress remains
+  a stop hint; separate terminal statistics must satisfy exact parsed/captured/
+  received equality, zero drops, positive canaries and unchanged underlay checks.
+  Timeout, expiry, missing accounting and forced retirement remain failures.
+- **124 offline tests PASS**, no skips; Bash syntax, CLI help and whitespace PASS.
+  Independent review's four findings were corrected and rechecked. Actual saved
+  176/180/0 evidence still fails strict proof. The exact four historical packets
+  remain unidentified; this is not new live acceptance.
+- [Implementation, review and verification](implementation-artifacts/spec-capture-accounting-shutdown.md).
+  This attempt remains **baseline FAIL / cleanup FAIL**; earlier baseline FAIL /
+  cleanup PASS remains separate. Private evidence and all prior handoffs survive.
+- User subsequently approved one commit and push of the two source/test files,
+  proposal/spec, redacted attempt results and this owner handoff on the existing
+  diagnostic branch. This supersedes earlier publication restrictions only for
+  that six-file checkpoint; no PR, merge, tag or runtime authority is implied.
+- Recorded stopped A/B and missing scratch remain separate blockers. No Docker/
+  GCP/VPN operation, real capture, container start, scratch recreation, cleanup
+  retry, reference adoption or new live attempt occurred during this offline fix.
+
+## Latest — available audit completed; A/B stopped and scratch missing
+
+- User reported adding `rat` to Docker membership and approved continuation.
+  A normal uid-1001 `sg docker` child picked up that membership; the agent changed
+  no account/socket/sudo policy. New fixed read-only window:
+  `2026-10-21T08:34:09Z`–`08:44:09Z`.
+- First successful Docker inspection found both original A/B stopped, exit 255,
+  finish times around `07:02:25Z`; original IDs remain. Reader paused, then user
+  explicitly approved only available stopped-state/host/VM metadata checks.
+- Continuation completed **08:39:31.588300Z: 61 available checks PASS**. Original
+  configuration/mounts/LD01 networks/homes and historical VM retention/source hashes
+  match. No active task host controller/capture/forward/listener or VM task process,
+  tunnel, loaded unit, unitfile or disk definition found. Fifth task VM material
+  remains retained/private. No credentials/profiles were opened.
+- **Blockers:** scratch `/tmp/opencode/linux-docker-sharing-ld01.r9oRt6uM/project`
+  is missing. Current in-container restoration/journal/zombie checks are unavailable
+  while stopped. Prior added bridge `a35e42ecd1f6` is now absent; historical owner
+  remains unverified. Current host reference differences were recorded, not adopted.
+- No start/restart/recreation, scratch replacement, cleanup retry or new live run.
+  Baseline FAIL / cleanup FAIL remain unchanged; source and all private evidence
+  preserved. Obtain explicit scratch disposition/start authority before any runtime
+  restoration. Offline capture-accounting investigation can use saved evidence.
+- [Full audit/disposition](linux-docker-trial/baseline-dns-live-20261020T224500Z-results.md).
+  New evidence: `read-only-audit-20261021T083409Z{,-continued}/` under the private
+  state parent. Redacted updates remain uncommitted; no publication authorized.
+
+## Latest — fresh read-only audit blocked on account-level Docker access
+
+- User approved exclusive read-only audit `2026-10-21T08:14:43Z`–`08:24:43Z`.
+  Agent stopped on Docker permission denial after 24 passed checks. Separately
+  approved normal-terminal continuation also stopped, at `08:23:17Z`, after the
+  same 24 checks; no container/VM metadata was obtained and no resource changed.
+- Local metadata confirms `rat` lacks Docker supplementary membership; socket
+  `root:docker` is `0660`, and group `docker` (115) lists only `botond`. Switching
+  terminals does not resolve that account-level restriction. No group/socket/sudo
+  policy modification or privileged audit retry was performed.
+- Choose an explicitly authorized narrow read-only Docker access method before a
+  new fixed audit window. Current independent restoration/retention checks remain
+  incomplete. [Updated attempt/audit record](linux-docker-trial/baseline-dns-live-20261020T224500Z-results.md).
+  Both the failed live attempt and prior audit failures retain their verdicts.
+
+## Latest — one authorized attempt FAIL; final audit incomplete, window expired
+
+- User explicitly authorized and launched the single prepared baseline-only
+  attempt in `2026-10-20T22:45:00Z`–`23:15:00Z`. Task `cvpn3f70841386b2`,
+  source `243d1a9`; controller `22:48:48.405735Z`–`22:50:22.720439Z`.
+- **Baseline FAIL / cleanup FAIL:** capture accounting is 176 parsed/captured,
+  180 received by filter, zero kernel drops. Wrapper receipt confirms requested
+  non-forced stop/exit 0; strict capture proof still fails. A restoration PASS
+  does not replace overall cleanup FAIL; supervisor retained failure without retry.
+- Read-only final audit passed 42 checks then stopped on a new host bridge
+  `br-a35e42ecd1f6` / `172.19.0.0/16` and two veths, absent from admission.
+  Remaining independent A residual/firewall and VM checks are incomplete. New A
+  material/new zombie PIDs 1071/1093 are recorded in controller evidence, not adopted.
+- Next observed clock `2026-10-21T08:12:12Z` is past the fixed hard stop. No further
+  Docker/GCP checks, cleanup retry, new controller, resource change or adoption.
+  Request a fresh bounded read-only window before completing the audit; investigate
+  packet accounting offline separately. Preserve all existing private material.
+- [Failure, evidence and next bounded action](linux-docker-trial/baseline-dns-live-20261020T224500Z-results.md).
+  These results are uncommitted; no new publication permission is inferred.
+
 ## Latest — cleanup fix integrated; fresh read-only admission complete
 
 - User approved committing/checkpointing/integration and exclusive read-only

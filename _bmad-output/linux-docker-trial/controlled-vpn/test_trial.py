@@ -896,6 +896,17 @@ class AdmissionAndObservationTests(unittest.TestCase):
                 else:
                     with self.assertRaises(ValueError): trial.capture_proof(state, [(99, 101)])
 
+    def test_historical_shaped_176_processed_180_received_zero_drop_still_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = self.capture(directory)
+            path = Path(state['capture']['stdout']); registration, header = path.read_text().splitlines()
+            path.write_text(registration + '\n' + (header + '\n') * 176 + '\n')
+            Path(state['capture']['stderr']).write_text('tcpdump: listening on vethA\n'
+                '176 packets captured\n180 packets received by filter\n0 packets dropped by kernel\n')
+            self.assertEqual(len(trial.capture_rows(path)), 176)
+            with self.assertRaisesRegex(ValueError, 'capture loss/count mismatch'):
+                trial.capture_proof(state, [(99, 101)])
+
     def test_capture_catches_prefix_and_dns_egress_including_held_vpn_source(self):
         for source, destination, port in (('172.16.0.2', '10.231.0.1', 8080),
                                           ('10.231.0.2', '10.231.0.1', 19091),
@@ -1768,7 +1779,7 @@ class ServerLifecycleTests(unittest.TestCase):
 
 class DetachedCaptureTests(unittest.TestCase):
     @contextlib.contextmanager
-    def capture_worker(self, mode='normal', expiry=30, clock_rollback=False):
+    def capture_worker(self, mode='normal', expiry=30, clock_rollback=False, clock_expiry=None):
         """Real registration/gate/stop worker; substitute ordinary Python for sudo/tcpdump."""
         with tempfile.TemporaryDirectory() as directory:
             c = trial.Trial(Path(directory), approval())
@@ -1776,15 +1787,50 @@ class DetachedCaptureTests(unittest.TestCase):
                            subnet='10.231.0.0/24', deadline=(trial.utc() + dt.timedelta(seconds=600 + expiry)).isoformat())
             code = r'''
 import os,pathlib,signal,sys,time
+mode=sys.argv[1]; captured=1; samples=0; first_sample=None
+def progress(*_):
+    global captured,samples,first_sample
+    samples+=1
+    if first_sample is None: first_sample=time.monotonic()
+    if mode in ('missing-progress','stale-progress'): return
+    if mode=='partial-progress':
+        print('tcpdump: 1 packet captured, 1 packet received by filter, 0 packets dropped by kernel',end='',file=sys.stderr,flush=True)
+        return
+    if mode=='slow-progress': time.sleep(.35)
+    if mode=='delayed-tail' and captured==1 and time.monotonic()-first_sample>=.15:
+        print('100.100000 IP 172.16.0.2.45000 > 172.16.0.1.20992: tcp 0',flush=True)
+        captured=2
+    received=2 if mode=='delayed-tail' else captured+1 if mode=='continuous-progress' else captured
+    dropped=1 if mode=='progress-kernel-drop' else 0
+    line=f'tcpdump: {captured} packets captured, {received} packets received by filter, {dropped} packets dropped by kernel'
+    if mode in ('progress-interface-drop','progress-interface-zero'):
+        line+=f", {1 if mode=='progress-interface-drop' else 0} packets dropped by interface"
+    if mode=='split-progress':
+        print(line[:25],end='',file=sys.stderr,flush=True); time.sleep(.05)
+        print(line[25:],file=sys.stderr,flush=True)
+    elif mode=='mixed-progress':
+        print(line+'\ntcpdump: partial accounting response',end='',file=sys.stderr,flush=True)
+    else: print(line,file=sys.stderr,flush=True)
+    if mode=='late-partial-progress':
+        time.sleep(.02)
+        print('tcpdump: partial accounting response',end='',file=sys.stderr,flush=True)
+    if mode=='expire-during-progress' and samples==2: pathlib.Path(sys.argv[2]).touch()
 def done(*_):
-    if sys.argv[1]=='exec-on-interrupt': os.execv(sys.executable,[sys.executable,'-c','import time; time.sleep(60)'])
-    print('1 packet captured\n1 packet received by filter\n0 packets dropped by kernel',file=sys.stderr,flush=True)
-    sys.exit(7 if sys.argv[1]=='bad-exit' else 0)
-signal.signal(signal.SIGINT,signal.SIG_IGN if sys.argv[1]=='ignore' else done)
+    if mode=='exec-on-interrupt': os.execv(sys.executable,[sys.executable,'-c','import time; time.sleep(60)'])
+    received=captured+1 if mode=='late-tail' else captured
+    dropped=1 if mode=='final-drop' else 0
+    if mode!='missing-final':
+        print(f'{captured} packets captured\n{received} packets received by filter\n{dropped} packets dropped by kernel',file=sys.stderr,flush=True)
+        if mode=='final-interface-drop': print('1 packet dropped by interface',file=sys.stderr,flush=True)
+    sys.exit(7 if mode=='bad-exit' else 0)
+signal.signal(signal.SIGUSR1,progress)
+signal.signal(signal.SIGINT,signal.SIG_IGN if mode=='ignore' else done)
 print('100.000000 IP 172.16.0.2.45000 > 172.16.0.1.20992: tcp 10',flush=True)
+if mode=='stale-progress':
+    print('tcpdump: 1 packet captured, 1 packet received by filter, 0 packets dropped by kernel',file=sys.stderr,flush=True)
 print('tcpdump: listening on vethA',file=sys.stderr,flush=True)
-if sys.argv[1]=='exec-drift': os.execv(sys.executable,[sys.executable,'-c','import time; time.sleep(60)'])
-if sys.argv[1]=='premature':
+if mode=='exec-drift': os.execv(sys.executable,[sys.executable,'-c','import time; time.sleep(60)'])
+if mode=='premature':
     while not pathlib.Path(sys.argv[2]).exists(): time.sleep(.01)
     done()
 time.sleep(60)
@@ -1793,14 +1839,19 @@ time.sleep(60)
             def ordinary_worker(command, **kwargs):
                 self.assertEqual(command[:6], ['sudo', '-n', 'python3', '-u', '-c', trial.CAPTURE])
                 worker = trial.CAPTURE
-                if clock_rollback:
-                    worker = '''import sys,time,types
+                if clock_rollback or clock_expiry:
+                    worker = '''import os,subprocess,sys,time,types
 real=time.time; start=time.monotonic()
 clock=types.ModuleType('time'); clock.__dict__.update(time.__dict__)
-clock.time=lambda: real()-(3600 if time.monotonic()-start>.2 else 0)
+if %r:
+    clock.time=lambda: real()-(3600 if time.monotonic()-start>.2 else 0)
+else:
+    marker=os.path.join(os.path.dirname(sys.argv[2]),'premature')
+    original=getattr(time,%r)
+    setattr(clock,%r,lambda: original()+(3600 if os.path.exists(marker) else 0))
 sys.modules['time']=clock
 exec(%r)
-''' % worker
+''' % (clock_rollback, clock_expiry or 'time', clock_expiry or 'time', worker)
                 return popen([sys.executable, '-u', '-c', worker, command[6], command[7],
                               sys.executable, '-u', '-c', code, mode, str(c.private / 'premature'), *command[8:]], **kwargs)
             with patch.object(trial, 'reserve'), patch.object(c, 'check_veth'), \
@@ -1827,11 +1878,86 @@ exec(%r)
             self.assertFalse(Path(record['stop_request']).exists())
             result = trial.stop_capture(c.state)
             self.assertEqual(result['captured'], 1)
+            self.assertIn('--immediate-mode', record['command'])
+            receipt = json.loads(Path(record['stderr']).read_text().split('capture-result: ')[1])
+            self.assertEqual(receipt['convergence'], 'complete')
             self.assertEqual(c.capture_process.wait(timeout=2), 0)
             self.assertIsNone(trial.process_identity(record['pid']))
             self.assertEqual(Path(record['stop_request']).stat().st_mode & 0o777, 0o600)
             self.assertEqual(result['source']['command'], record['command'])
             self.assertEqual(trial.stop_capture(c.state)['dropped'], 0)  # Same completed stop is idempotent.
+
+    def test_delayed_receive_tail_is_processed_before_requested_interrupt(self):
+        with self.capture_worker('delayed-tail') as c:
+            result = trial.stop_capture(c.state)
+            self.assertEqual((result['captured'], result['received'], result['dropped']), (2, 2, 0))
+            text = Path(c.state['capture']['stderr']).read_text()
+            progress, terminal = text.split('capture-terminal:\n')
+            self.assertIn('1 packets captured, 2 packets received', progress)
+            self.assertGreaterEqual(progress.count('2 packets captured, 2 packets received'), 2)
+            self.assertTrue(terminal.startswith('2 packets captured\n2 packets received by filter\n'))
+
+    def test_good_progress_cannot_replace_strict_terminal_accounting(self):
+        for mode, message in (('late-tail', 'loss/count mismatch'), ('final-drop', 'loss/count mismatch'),
+                              ('final-interface-drop', 'interface capture drops'),
+                              ('missing-final', 'terminal statistics')):
+            with self.subTest(mode=mode), self.capture_worker(mode) as c:
+                with self.assertRaisesRegex(ValueError, message): trial.stop_capture(c.state)
+                self.assertIsNone(trial.process_identity(c.state['capture']['pid']))
+
+    def test_missing_partial_stale_and_nonconverging_progress_cannot_pass(self):
+        for mode in ('missing-progress', 'partial-progress', 'stale-progress', 'continuous-progress', 'mixed-progress', 'late-partial-progress',
+                     'progress-kernel-drop', 'progress-interface-drop'):
+            with self.subTest(mode=mode), self.capture_worker(mode) as c:
+                start = time.monotonic()
+                with self.assertRaisesRegex(ValueError, 'completion'): trial.stop_capture(c.state)
+                self.assertLess(time.monotonic() - start, 4)
+                text = Path(c.state['capture']['stderr']).read_text()
+                receipt = json.loads(text.split('capture-result: ')[1])
+                self.assertEqual(receipt['convergence'], 'timeout')
+                self.assertEqual(receipt['returncode'], 0)  # Even equal final counts cannot repair timeout.
+                self.assertIsNone(trial.process_identity(c.state['capture']['pid']))
+
+    def test_delayed_split_and_optional_zero_drop_progress_are_supported(self):
+        for mode in ('slow-progress', 'split-progress', 'progress-interface-zero'):
+            with self.subTest(mode=mode), self.capture_worker(mode) as c:
+                result = trial.stop_capture(c.state)
+                self.assertEqual((result['captured'], result['received'], result['dropped']), (1, 1, 0))
+
+    def test_expiry_during_requested_convergence_never_claims_success(self):
+        for clock in ('time', 'monotonic'):
+            with self.subTest(clock=clock), self.capture_worker('expire-during-progress', clock_expiry=clock) as c:
+                start = time.monotonic()
+                with self.assertRaisesRegex(ValueError, 'completion'): trial.stop_capture(c.state)
+                self.assertLess(time.monotonic() - start, 2)
+                text = Path(c.state['capture']['stderr']).read_text()
+                self.assertEqual(text.count('tcpdump: 1 packets captured, 1 packets received'), 2)
+                receipt = json.loads(text.split('capture-result: ')[1])
+                self.assertEqual(receipt['reason'], 'expiry')
+                self.assertNotEqual(receipt['convergence'], 'complete')
+                self.assertNotEqual(c.capture_process.wait(timeout=2), 0)
+                self.assertFalse((c.private / 'cleaned.json').exists())
+                self.assertIsNone(trial.process_identity(c.state['capture']['pid']))
+
+    def test_missing_convergence_attestation_and_terminal_marker_are_rejected(self):
+        with self.capture_worker() as c:
+            trial.stop_capture(c.state); c.capture_process.wait(timeout=2)
+            path = Path(c.state['capture']['stderr']); original = path.read_text()
+            prefix, raw = original.split('capture-result: '); receipt = json.loads(raw)
+            receipt.pop('convergence')
+            path.write_text(prefix + 'capture-result: ' + json.dumps(receipt) + '\n')
+            with self.assertRaisesRegex(ValueError, 'completion'): trial.stop_capture(c.state)
+            path.write_text(original.replace('capture-terminal:\n', ''))
+            with self.assertRaisesRegex(ValueError, 'terminal statistics'): trial.stop_capture(c.state)
+
+    def test_short_expiry_budget_skips_convergence_and_cannot_claim_success(self):
+        with self.capture_worker(expiry=3) as c:
+            start = time.monotonic()
+            with self.assertRaisesRegex(ValueError, 'completion'): trial.stop_capture(c.state)
+            self.assertLess(time.monotonic() - start, 2)
+            receipt = json.loads(Path(c.state['capture']['stderr']).read_text().split('capture-result: ')[1])
+            self.assertEqual(receipt['convergence'], 'timeout')
+            self.assertIsNone(trial.process_identity(c.state['capture']['pid']))
 
     def test_other_attempt_stop_does_not_interrupt_this_capture(self):
         with self.capture_worker() as c:
@@ -1926,7 +2052,7 @@ exec(%r)
             path = Path(c.state['capture']['stderr']); text = path.read_text()
             prefix, receipt_text = text.rsplit('capture-result: ', 1)
             receipt = json.loads(receipt_text)
-            for key in ('pid', 'identity', 'stop_request', 'command', 'worker_pid', 'worker_identity', 'signalled'):
+            for key in ('pid', 'identity', 'stop_request', 'command', 'worker_pid', 'worker_identity', 'signalled', 'convergence'):
                 wrong = dict(receipt); wrong[key] = False if key == 'signalled' else ['wrong'] if key == 'command' else 'wrong'
                 path.write_text(prefix + 'capture-result: ' + json.dumps(wrong) + '\n')
                 with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'completion'):
