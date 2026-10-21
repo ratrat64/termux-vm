@@ -9,12 +9,31 @@ root=/var/lib/ld01-cvpn-$task
 prefix=ld01-$task
 source_dir=$(dirname "$(readlink -f "$0")")
 mode=${7:-setup}
-[[ $deadline == 2026-10-20T10:31:09Z ]] || { printf 'Unapproved deadline\n' >&2; exit 1; }
+python3 - "$source_dir/authorization.json" "$deadline" "$mode" <<'PY'
+import datetime, json, sys
+approval = json.load(open(sys.argv[1]))
+def check(value):
+    if not value: raise ValueError('fresh campaign authorization mismatch')
+check(approval['deadline'] == sys.argv[2])
+start, end = [datetime.datetime.strptime(approval[k], '%Y-%m-%dT%H:%M:%SZ') for k in ('start', 'deadline')]
+baseline = approval.get('mode') == 'baseline-only'
+check(0 < (end-start).total_seconds() <= (1800 if baseline else 2700))
+check(all(approval.get(k) is True for k in ('observation','exclusive_reuse','supervised_off')))
+if baseline:
+    check(approval.get('injection') is False and approval.get('cases') == [])
+    check(approval.get('post_reboot_reconciled') is True)
+else:
+    check(approval.get('mode','n2') == 'n2' and approval.get('injection') is True)
+    check(approval.get('cases') == ['F1', 'F2'])
+check(approval.get('targets') == ['tvm-share-ld01-a','free-vm','A-veth','example.com'])
+if sys.argv[3] != 'rollback':
+    check(start <= datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) < end-datetime.timedelta(minutes=10))
+PY
 [[ $task =~ ^cvpn[0-9a-f]{12}$ && $receipt =~ ^[0-9a-f]{32}$ ]] || exit 1
 end_epoch=$(date -u -d "$deadline" +%s)
 
 cleanup_reserve() {
-    remaining=$(( end_epoch - $(date -u +%s) - 180 ))
+    remaining=$(( end_epoch - $(date -u +%s) - 600 ))
     (( remaining > 0 )) && [[ ! -e $source_dir/cancelled ]]
 }
 
@@ -23,13 +42,14 @@ rollback_units() {
     if [[ -e $root ]]; then
         [[ $(< "$root/receipt") == "$receipt" ]] || return 1
     fi
-    for service in http dns heartbeat vpn; do
+    for service in http dns heartbeat vpnheartbeat vpn; do
         unit=$prefix-$service.service
-        if [[ -f /etc/systemd/system/$unit ]]; then systemctl stop "$unit" || failed=1; fi
-        if systemctl is-active --quiet "$unit"; then failed=1; fi
-    done
-    for service in http dns heartbeat vpn; do
-        rm -f "/etc/systemd/system/$prefix-$service.service"
+        if [[ -f /etc/systemd/system/$unit ]] && ! systemctl stop "$unit"; then
+            failed=1
+            continue  # Keep the unit definition for an explicit teardown retry.
+        fi
+        if systemctl is-active --quiet "$unit"; then failed=1; continue; fi
+        rm -f "/etc/systemd/system/$unit"
     done
     systemctl daemon-reload || failed=1
     return "$failed"
@@ -39,14 +59,14 @@ if [[ $mode == rollback ]]; then
     # Publish cancellation before waiting: a queued/late setup cannot start later.
     touch "$source_dir/cancelled"
     exec 9>"$source_dir/lifecycle.lock"
-    flock -w 330 9 || exit 1
+    flock -w 90 9 || exit 1
     # The setup worker (and its timeout-controlled children) have now terminated.
     rollback_units
     exit $?
 elif [[ $mode == setup ]]; then
     cleanup_reserve
     budget=$remaining
-    (( budget <= 300 )) || budget=300
+    (( budget <= 80 )) || budget=80
     # Bound the whole worker, including lock acquisition, packages and services.
     exec timeout --signal=TERM --kill-after=5s "${budget}s" bash "$0" "${@:1:6}" worker
 elif [[ $mode != worker ]]; then
@@ -54,7 +74,7 @@ elif [[ $mode != worker ]]; then
 fi
 
 exec 9>"$source_dir/lifecycle.lock"
-flock -w 300 9
+flock -w 8 9
 cleanup_reserve
 
 # All collision/deadline checks precede packages, directories, keys and units.
@@ -67,7 +87,6 @@ check(re.fullmatch(r'cvpn[0-9a-f]{12}', task), 'invalid task identity')
 check(re.fullmatch(r'[0-9a-f]{32}', receipt), 'invalid ownership receipt')
 end = datetime.datetime.fromisoformat(deadline.replace('Z', '+00:00'))
 check(datetime.datetime.now(datetime.timezone.utc) < end - datetime.timedelta(minutes=10), 'deadline/cleanup reserve')
-check(end <= datetime.datetime.fromisoformat('2026-10-20T10:31:09+00:00'), 'deadline exceeds approval')
 net = ipaddress.ip_network(subnet)
 check(net.version == 4 and net.prefixlen == 24 and net.is_private, 'invalid subnet')
 check(ipaddress.ip_address(bridge).version == 4 and 1024 < int(port) < 65536, 'invalid forward')
@@ -96,10 +115,8 @@ chmod 700 "$root/rollback.sh"
 trap 'status=$?; if (( status != 0 )); then touch "$source_dir/cancelled"; rollback_units > "$root/rollback-failure.log" 2>&1 || true; fi' EXIT
 trap 'exit 143' TERM
 
-export DEBIAN_FRONTEND=noninteractive
-# dnsmasq-base contains the binary, not the system-wide dnsmasq daemon.
-apt-get update > "$root/packages.log" 2>&1
-apt-get install -y --no-install-recommends openvpn dnsmasq-base openssl python3 >> "$root/packages.log" 2>&1
+# Reuse retained versions. A missing prerequisite rejects this campaign; no apt action.
+for binary in openvpn dnsmasq openssl python3; do command -v "$binary" >/dev/null; done
 dpkg-query -W -f='${binary:Package}\t${Version}\n' > "$root/packages-after.tsv"
 cd "$root"
 openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 2 -subj /CN=LD01-Controlled-Lab-CA \
@@ -166,24 +183,14 @@ for entry in 'ca ca.crt' 'cert client.crt' 'key client.key' 'tls-crypt tls-crypt
     cat "$file" >> client.ovpn
     printf '</%s>\n' "$tag" >> client.ovpn
 done
-cat > dns.conf <<EOF
-listen-address=$server
-bind-interfaces
-port=53
-no-hosts
-local=/ld01.test/
-host-record=service.ld01.test,$server
-cache-size=50
-user=root
-group=root
-EOF
-for service in vpn http dns heartbeat; do
+for service in vpn http dns heartbeat vpnheartbeat; do
     cleanup_reserve
     case $service in
         vpn) command="/usr/sbin/openvpn --config $root/server.conf"; after=network.target ;;
         http) command="/usr/bin/python3 $root/fixtures.py http --host $server --port 8080 --fixture $task"; after="$prefix-vpn.service" ;;
-        dns) command="/usr/sbin/dnsmasq --keep-in-foreground --conf-file=$root/dns.conf"; after="$prefix-vpn.service" ;;
+        dns) command="/usr/bin/python3 $root/fixtures.py dns --host $server --port 53"; after="$prefix-vpn.service" ;;
         heartbeat) command="/usr/bin/python3 $root/fixtures.py heartbeat --host 127.0.0.1 --port 19090"; after=network.target ;;
+        vpnheartbeat) command="/usr/bin/python3 $root/fixtures.py heartbeat --host $server --port 19091"; after="$prefix-vpn.service" ;;
     esac
     cat > "/etc/systemd/system/$prefix-$service.service" <<EOF
 [Unit]
@@ -193,6 +200,7 @@ After=$after
 Type=simple
 ExecStart=$command
 Restart=no
+# Leave the cleanup reserve, including any delay between unit creation/start.
 RuntimeMaxSec=$remaining
 TimeoutStopSec=15
 TimeoutStartSec=15
@@ -210,15 +218,17 @@ for attempt in {1..40}; do
     sleep 0.25
 done
 ip -4 addr show dev ld01srv > tunnel.txt
-for service in http dns heartbeat; do
+for service in http dns heartbeat vpnheartbeat; do
     cleanup_reserve
     systemctl start "$prefix-$service.service"
 done
-for service in vpn http dns heartbeat; do systemctl is-active --quiet "$prefix-$service.service"; done
+for service in vpn http dns heartbeat vpnheartbeat; do systemctl is-active --quiet "$prefix-$service.service"; done
 python3 - "$task" "$subnet" "$server" "$deadline" <<'PY' > server.json
 import json, subprocess, sys
 task, subnet, server, deadline = sys.argv[1:]
 print(json.dumps(dict(task=task, subnet=subnet, server=server, deadline=deadline,
+    dns_backend='fixtures.py:dns', python_executable='/usr/bin/python3',
+    python=subprocess.check_output(['/usr/bin/python3', '--version'], text=True).strip(),
     openvpn=subprocess.check_output(['openvpn', '--version'], text=True).splitlines()[0],
     dnsmasq=subprocess.check_output(['dnsmasq', '--version'], text=True).splitlines()[0])))
 PY
