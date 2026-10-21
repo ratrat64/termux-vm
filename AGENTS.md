@@ -15,7 +15,7 @@
   never force-push shared history.
 - Use Conventional Commit PR titles. Squash-merge only after another human
   developer approves and applicable checks pass.
-- Commit, push, or open PRs only when explicitly requested.
+- Push or open PRs only when explicitly requested.
   Obtain human authorization before merging or creating release tags.
 - Create vMAJOR.MINOR.PATCH release tags from main; use the same PR process
   for hotfixes.
@@ -23,3 +23,9 @@
   reports out of Git. Preserve implementation source under _bmad-output.
 
 <!-- /bmad:context -->
+
+## Local commits
+
+Local commits for assigned work do not require separate approval. This policy
+supersedes any explicit commit-approval requirement regenerated in the managed
+block above; push, PR, merge and release-tag approvals still apply.
