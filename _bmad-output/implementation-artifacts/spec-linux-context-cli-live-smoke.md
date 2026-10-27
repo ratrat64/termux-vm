@@ -2,7 +2,7 @@
 title: 'Real-Docker smoke verification of the Linux LD01 context CLI'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-review'
+status: 'done'
 baseline_revision: '85a0d47bd09ca7a4ae296640e22ee5c34da7aaf7'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -180,8 +180,8 @@ admission inputs/expected identities rather than accepting current state as base
 
 ## Auto Run Result
 
-**Status: IN REVIEW — publication scope resolved on the authorized clean branch;
-push and PR creation pending.** Live CLI verification remains the historical PASS
+**Status: DONE — publication scope resolved, branch pushed and PR opened against
+main.** Live CLI verification remains the historical PASS
 recorded below; it was not rerun during publication.
 
 Implemented `smoke.py` (stdlib real subprocess/PTY smoke and guarded admission),
@@ -203,7 +203,7 @@ contract. CLI and its 19 existing tests are unchanged: no CLI defect was demonst
 | Existing plus harness offline suite | PASS | Exact prescribed unittest command, 33 tests |
 | Independent review | PASS | Four layers plus focused final independent patch verification above |
 | Whitespace | PASS | `git diff --check`, `git diff --cached --check` |
-| Task-scoped PR | PENDING | Scope blocker resolved on clean publication branch; see publication follow-up below |
+| Task-scoped PR | PASS | Clean publication branch pushed; [PR #7](https://github.com/ratrat64/termux-vm/pull/7) opened against main |
 
 Both smoke runs exercised actual Docker list/status template rendering with exact
 A/B results, actual simultaneous A/A/B PTYs, UID/GID 1001, HOME `/home/session`, cwd
@@ -269,3 +269,9 @@ The diff against main contains exactly seven files: the five files under
 commit is included. The original `feat/linux-context-cli` branch remains at
 `b6f16702395e9945ad51bb8751bb621f53ef9530` without modification or force-push.
 This follow-up changes publication metadata only after the two cherry-picks.
+
+Publication succeeded: `feat/linux-context-cli-smoke` was pushed normally and
+[PR #7](https://github.com/ratrat64/termux-vm/pull/7) was opened against `main`.
+The earlier publication blocker is resolved. This final status update is committed
+and pushed to the same PR branch. No live checks were rerun, and no merge or tag
+was performed.
