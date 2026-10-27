@@ -2,7 +2,7 @@
 title: 'Real-Docker smoke verification of the Linux LD01 context CLI'
 type: 'feature'
 created: '2026-10-27'
-status: 'blocked'
+status: 'in-review'
 baseline_revision: '85a0d47bd09ca7a4ae296640e22ee5c34da7aaf7'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -180,7 +180,9 @@ admission inputs/expected identities rather than accepting current state as base
 
 ## Auto Run Result
 
-**Status: BLOCKED — publication scope, not live CLI verification.**
+**Status: IN REVIEW — publication scope resolved on the authorized clean branch;
+push and PR creation pending.** Live CLI verification remains the historical PASS
+recorded below; it was not rerun during publication.
 
 Implemented `smoke.py` (stdlib real subprocess/PTY smoke and guarded admission),
 `test_smoke.py` (14 offline boundary/predicate tests), and README usage/admission
@@ -201,7 +203,7 @@ contract. CLI and its 19 existing tests are unchanged: no CLI defect was demonst
 | Existing plus harness offline suite | PASS | Exact prescribed unittest command, 33 tests |
 | Independent review | PASS | Four layers plus focused final independent patch verification above |
 | Whitespace | PASS | `git diff --check`, `git diff --cached --check` |
-| Task-scoped PR | BLOCKED | Pre-existing unrelated unmerged ancestor described below |
+| Task-scoped PR | PENDING | Scope blocker resolved on clean publication branch; see publication follow-up below |
 
 Both smoke runs exercised actual Docker list/status template rendering with exact
 A/B results, actual simultaneous A/A/B PTYs, UID/GID 1001, HOME `/home/session`, cwd
@@ -217,7 +219,7 @@ Private observations remain only in the mode-0700 evidence directory recorded
 above, with mode-0600 files. Raw IDs, PIDs, mount sources, namespace identifiers and
 journal contents/hashes are not published in this continuation.
 
-### Concrete publication blocker
+### Historical publication blocker — resolved by authorized follow-up
 
 Fresh `git fetch origin` confirms main is
 `31d41e256cc8d25c92490fb54ca64ed179717415`. The supplied published task branch
@@ -235,3 +237,35 @@ Limits: CLI behavior only. Timeout/error paths use offline regressions, not live
 fault injection; abnormal remote-shell closure can only be reported unconfirmed.
 No VPN readiness, account isolation, restoration audit, WSL2 or arbitrary-container
 support claim. Historical evidence and completed spec remain untouched.
+
+### 2026-10-27 — Authorized clean-branch publication follow-up
+
+The user explicitly authorized a new branch/worktree from current `origin/main`,
+cherry-picking only the existing CLI and smoke commits, preserving the published
+branch, rerunning offline checks and opening a scoped PR. No live checks, merge or
+tag is authorized for this follow-up.
+
+Owner: coordinating OpenCode agent. New branch `feat/linux-context-cli-smoke`;
+separate worktree `/home/rat/Git/termux-vm/termux-vm-linux-context-cli-smoke`.
+Freshly fetched base and merge-base:
+`31d41e256cc8d25c92490fb54ca64ed179717415`.
+
+Only these two implementation commits were cherry-picked, without conflicts:
+
+| Original canonical revision | New canonical revision |
+|---|---|
+| `85a0d47bd09ca7a4ae296640e22ee5c34da7aaf7` | `106d0254f83abd50a0a9bf1928b325ab9994b955` |
+| `b6f16702395e9945ad51bb8751bb621f53ef9530` | `a4dcae0b6454e03022b3bf1cea22676be89315f7` |
+
+Offline verification on this new base: exact prescribed unittest command **PASS,
+33 tests**; `git diff origin/main...HEAD --check` **PASS**. Before this status update,
+comparison with the original published tip showed byte-identical CLI/smoke source,
+tests, README and both task specs. Existing independent review and live results
+are preserved as historical evidence, not re-executed or made fresh.
+
+The diff against main contains exactly seven files: the five files under
+`_bmad-output/linux-context/` and the CLI/smoke task specs under
+`_bmad-output/implementation-artifacts/`. Neither Gate 4 file nor its unrelated
+commit is included. The original `feat/linux-context-cli` branch remains at
+`b6f16702395e9945ad51bb8751bb621f53ef9530` without modification or force-push.
+This follow-up changes publication metadata only after the two cherry-picks.
